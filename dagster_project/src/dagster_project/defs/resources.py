@@ -3,6 +3,7 @@ import os
 import dagster as dg
 
 from dagster_project.gcp import BigQueryResource, LandingBucketResource
+from dagster_project.kolada import KoladaResource
 
 
 @dg.definitions
@@ -24,5 +25,6 @@ def resources() -> dg.Definitions:
                 location="EU",
                 impersonate_service_account=impersonate,
             ),
+            "kolada": KoladaResource(),
         }
     )
