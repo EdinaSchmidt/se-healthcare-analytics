@@ -17,6 +17,7 @@ from dagster_project.landing import (
     parse_extract,
     to_snake_case,
 )
+from dagster_project.sensors import build_snapshot_sensor
 
 RAW_DATASET = "raw_waiting_times"
 
@@ -144,32 +145,13 @@ def build_raw_asset(ds: LandingDataset) -> dg.AssetsDefinition:
     return _raw_asset
 
 
-def build_snapshot_sensor(ds: LandingDataset, asset: dg.AssetsDefinition) -> dg.SensorDefinition:
-    @dg.sensor(
-        name=f"{RAW_DATASET}_{ds.table}_sensor",
-        target=asset,
-        minimum_interval_seconds=24 * 60 * 60,
-        description=f"Loads {ds.table} when a new complete snapshot lands in {ds.prefix}",
-    )
-    def _sensor(context: dg.SensorEvaluationContext, landing: LandingBucketResource):
-        snapshot = find_latest_complete_snapshot(landing.get_client(), landing.bucket, ds.prefix)
-        if snapshot is None:
-            return dg.SkipReason("No complete snapshot yet")
-
-        snapshot_id = snapshot.snapshot_date.isoformat()
-        if context.cursor == snapshot_id:
-            return dg.SkipReason(f"Latest snapshot {snapshot_id} already requested")
-
-        context.update_cursor(snapshot_id)
-        return dg.RunRequest(run_key=f"{ds.table}:{snapshot_id}")
-
-    return _sensor
-
-
 @dg.definitions
 def defs() -> dg.Definitions:
     assets = {ds.table: build_raw_asset(ds) for ds in WAITING_TIMES_DATASETS}
     return dg.Definitions(
         assets=list(assets.values()),
-        sensors=[build_snapshot_sensor(ds, assets[ds.table]) for ds in WAITING_TIMES_DATASETS],
+        sensors=[
+            build_snapshot_sensor(f"{RAW_DATASET}_{ds.table}_sensor", ds.prefix, assets[ds.table])
+            for ds in WAITING_TIMES_DATASETS
+        ],
     )

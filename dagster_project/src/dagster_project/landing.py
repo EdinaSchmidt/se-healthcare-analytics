@@ -71,3 +71,13 @@ def to_snake_case(name: str) -> str:
     ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
     snake = re.sub(r"[^0-9a-zA-Z]+", "_", ascii_name).strip("_").lower()
     return f"c_{snake}" if snake[:1].isdigit() else snake
+
+
+def list_snapshot_files(client: storage.Client, bucket: str, snapshot: Snapshot, suffix: str) -> list:
+    """Files with the given suffix directly inside the snapshot folder, sorted by name."""
+    blobs = [
+        b
+        for b in client.list_blobs(bucket, prefix=snapshot.folder)
+        if "/" not in b.name[len(snapshot.folder) :] and b.name.lower().endswith(suffix)
+    ]
+    return sorted(blobs, key=lambda b: b.name)
