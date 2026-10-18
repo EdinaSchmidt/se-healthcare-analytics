@@ -1,0 +1,10 @@
+se_healthcare_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth
+      impersonate_service_account: dbt-sa@se-healthcare-analytics.iam.gserviceaccount.com
+      project: se-healthcare-analytics
+      dataset: dbt_dev
+      location: EU
