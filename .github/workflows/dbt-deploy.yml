@@ -1,8 +1,8 @@
-name: dbt deploy manifest
+name: dbt deploy
 
-# After a merge to main: parse the project against the prod target and publish
+# After a merge to main: build and test the project against the prod target, then publish
 # manifest.json. CI compares PRs against it (state:modified) and defers to prod with it.
-# Prod tables themselves are built by Dagster locally (DBT_TARGET=prod).
+# Code changes reach prod here; data changes reach prod via Dagster when new raw data loads.
 
 on:
   push:
@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
   id-token: write
+
+concurrency:
+  group: dbt-deploy
+  cancel-in-progress: false
 
 jobs:
   manifest:
@@ -42,8 +46,8 @@ jobs:
       - name: Install dbt packages
         run: uv run dbt deps
 
-      - name: Parse against prod
-        run: uv run dbt parse --target prod
+      - name: Build prod
+        run: uv run dbt build --target prod
 
       - name: Upload manifest
         run: gcloud storage cp target/manifest.json "gs://${ARTIFACTS_BUCKET}/prod/manifest.json"
