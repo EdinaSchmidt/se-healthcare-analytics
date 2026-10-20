@@ -1,6 +1,7 @@
 name: dbt CI cleanup
 
 # Drops the PR's CI datasets (dbt_ci_pr_<n>, dbt_ci_pr_<n>_staging, ...) when the PR closes.
+# Uses the BigQuery REST API directly: the bq CLI prints setup text that breaks JSON parsing.
 
 on:
   pull_request:
@@ -18,24 +19,22 @@ jobs:
       PREFIX: dbt_ci_pr_${{ github.event.pull_request.number }}
 
     steps:
-      - uses: google-github-actions/auth@v2
+      - id: auth
+        uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DBT_SA }}
-
-      - uses: google-github-actions/setup-gcloud@v2
+          token_format: access_token
 
       - name: Drop PR datasets
+        env:
+          TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
           set -euo pipefail
-          # First bq call in a fresh runner prints setup text; absorb it.
-          bq --headless ls --project_id="$PROJECT_ID" > /dev/null 2>&1 || true
+          API="https://bigquery.googleapis.com/bigquery/v2/projects/${PROJECT_ID}/datasets"
 
-          bq --headless ls --project_id="$PROJECT_ID" --max_results=1000 --format=json > datasets.json
-
-          # jq runs on its own so a parse error fails the step;
-          # only grep's "no match" is tolerated.
-          ids=$(jq -r '.[].datasetReference.datasetId' datasets.json)
+          curl -sSf -H "Authorization: Bearer ${TOKEN}" "${API}?maxResults=1000" > datasets.json
+          ids=$(jq -r '.datasets[]?.datasetReference.datasetId' datasets.json)
           datasets=$(echo "$ids" | grep -E "^${PREFIX}(_|$)" || true)
 
           if [ -z "$datasets" ]; then
@@ -44,5 +43,5 @@ jobs:
           fi
           for ds in $datasets; do
             echo "Dropping $ds"
-            bq --headless rm -r -f -d "${PROJECT_ID}:${ds}"
+            curl -sSf -X DELETE -H "Authorization: Bearer ${TOKEN}" "${API}/${ds}?deleteContents=true"
           done
