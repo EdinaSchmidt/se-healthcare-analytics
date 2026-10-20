@@ -8,6 +8,9 @@ sources:
           loaded_at_field: _fetched_at
           freshness:
             warn_after: {count: 35, period: day}
+          meta:
+            dagster:
+              asset_key: ["raw_kolada", "kpi_values"]
         data_tests:
           - dbt_utils.unique_combination_of_columns:
               arguments:
@@ -16,13 +19,23 @@ sources:
                   - municipality
                   - period
                   - gender
+
       - name: kpis
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_kolada", "kpis"]
         columns:
           - name: id
             data_tests:
               - unique
               - not_null
+
       - name: regions
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_kolada", "regions"]
         columns:
           - name: id
             data_tests:

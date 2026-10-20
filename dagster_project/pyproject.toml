@@ -4,6 +4,7 @@ requires-python = ">=3.10,<3.15"
 version = "0.1.0"
 dependencies = [
     "dagster==1.13.26",
+    "dagster-dbt>=0.29.26",
     "google-cloud-bigquery>=3.46.2",
     "google-cloud-storage>=3.17.1",
     "openpyxl>=3.1.5",
