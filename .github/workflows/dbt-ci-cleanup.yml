@@ -27,10 +27,22 @@ jobs:
 
       - name: Drop PR datasets
         run: |
-          datasets=$(bq ls --project_id="$PROJECT_ID" --max_results=1000 --format=json \
-            | jq -r '.[].datasetReference.datasetId' \
-            | grep -E "^${PREFIX}(_|$)" || true)
+          set -euo pipefail
+          # First bq call in a fresh runner prints setup text; absorb it.
+          bq --headless ls --project_id="$PROJECT_ID" > /dev/null 2>&1 || true
+
+          bq --headless ls --project_id="$PROJECT_ID" --max_results=1000 --format=json > datasets.json
+
+          # jq runs on its own so a parse error fails the step;
+          # only grep's "no match" is tolerated.
+          ids=$(jq -r '.[].datasetReference.datasetId' datasets.json)
+          datasets=$(echo "$ids" | grep -E "^${PREFIX}(_|$)" || true)
+
+          if [ -z "$datasets" ]; then
+            echo "No datasets matching ${PREFIX}"
+            exit 0
+          fi
           for ds in $datasets; do
             echo "Dropping $ds"
-            bq rm -r -f -d "${PROJECT_ID}:${ds}"
+            bq --headless rm -r -f -d "${PROJECT_ID}:${ds}"
           done
