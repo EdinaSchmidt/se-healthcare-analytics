@@ -1,0 +1,31 @@
+sources:
+  - name: kolada
+    database: se-healthcare-analytics 
+    schema: raw_kolada 
+    tables:
+      - name: kpi_values
+        config:
+          loaded_at_field: _fetched_at
+          freshness:
+            warn_after: {count: 35, period: day}
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: 
+                  - kpi
+                  - municipality
+                  - period
+                  - gender
+      - name: kpis
+        columns:
+          - name: id
+            data_tests:
+              - unique
+              - not_null
+      - name: regions
+        columns:
+          - name: id
+            data_tests:
+              - unique
+              - not_null
+
