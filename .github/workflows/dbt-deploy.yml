@@ -1,0 +1,53 @@
+name: dbt deploy
+
+# After a merge to main: build and test the project against the prod target, then publish
+# manifest.json. CI compares PRs against it (state:modified) and defers to prod with it.
+# Code changes reach prod here; data changes reach prod via Dagster when new raw data loads.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "dbt_project/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: dbt-deploy
+  cancel-in-progress: false
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dbt_project
+    env:
+      ARTIFACTS_BUCKET: se-healthcare-analytics-dbt-artifacts
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dbt (pinned in uv.lock)
+        run: uv sync --frozen
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DBT_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install dbt packages
+        run: uv run dbt deps
+
+      - name: Build prod
+        run: uv run dbt build --target prod
+
+      - name: Upload manifest
+        run: gcloud storage cp target/manifest.json "gs://${ARTIFACTS_BUCKET}/prod/manifest.json"
