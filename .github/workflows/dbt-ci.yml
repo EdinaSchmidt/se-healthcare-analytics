@@ -1,0 +1,63 @@
+name: dbt CI
+
+# Builds and tests only the models changed in a PR, in a throwaway dataset per PR.
+# Unchanged upstream models are read from prod (--defer).
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write   # needed for Workload Identity Federation
+
+concurrency:
+  group: dbt-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dbt_project
+    env:
+      DBT_CI_DATASET: dbt_ci_pr_${{ github.event.pull_request.number }}
+      ARTIFACTS_BUCKET: se-healthcare-analytics-dbt-artifacts
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dbt (pinned in uv.lock)
+        run: uv sync --frozen
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DBT_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install dbt packages
+        run: uv run dbt deps
+
+      - name: Download prod manifest
+        id: state
+        run: |
+          mkdir -p prod-state
+          if gcloud storage cp "gs://${ARTIFACTS_BUCKET}/prod/manifest.json" prod-state/manifest.json; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No prod manifest yet: building everything."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: dbt build (modified models and their children)
+        if: steps.state.outputs.found == 'true'
+        run: uv run dbt build --target ci --select state:modified+ --defer --state prod-state
+
+      - name: dbt build (full project)
+        if: steps.state.outputs.found != 'true'
+        run: uv run dbt build --target ci

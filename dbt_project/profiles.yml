@@ -8,3 +8,18 @@ se_healthcare_analytics:
       project: se-healthcare-analytics
       dataset: dbt_dev
       location: EU
+
+    prod:
+      type: bigquery
+      method: oauth
+      project: se-healthcare-analytics
+      dataset: analytics
+      location: EU
+      impersonate_service_account: dbt-sa@se-healthcare-analytics.iam.gserviceaccount.com
+      
+    ci:
+      type: bigquery
+      method: oauth
+      project: se-healthcare-analytics
+      dataset: "{{ env_var('DBT_CI_DATASET', 'dbt_ci') }}"
+      location: EU

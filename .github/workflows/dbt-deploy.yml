@@ -1,0 +1,49 @@
+name: dbt deploy manifest
+
+# After a merge to main: parse the project against the prod target and publish
+# manifest.json. CI compares PRs against it (state:modified) and defers to prod with it.
+# Prod tables themselves are built by Dagster locally (DBT_TARGET=prod).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "dbt_project/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dbt_project
+    env:
+      ARTIFACTS_BUCKET: se-healthcare-analytics-dbt-artifacts
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dbt (pinned in uv.lock)
+        run: uv sync --frozen
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DBT_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install dbt packages
+        run: uv run dbt deps
+
+      - name: Parse against prod
+        run: uv run dbt parse --target prod
+
+      - name: Upload manifest
+        run: gcloud storage cp target/manifest.json "gs://${ARTIFACTS_BUCKET}/prod/manifest.json"
