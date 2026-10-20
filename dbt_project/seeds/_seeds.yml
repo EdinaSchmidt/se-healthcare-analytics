@@ -1,0 +1,41 @@
+seeds:
+  - name: kolada_kpi_translations
+    description: Unofficial English translations of the Kolada KPI catalogue (name, short name, description, operating area, perspective), plus unit and cost role per KPI.
+    config: 
+      column_types: 
+        kpi_id: string 
+    columns:
+      - name: kpi_id
+        data_tests:
+          - unique
+          - not_null
+      - name: unit
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments: 
+                values: 
+                  - sek_per_inhabitant
+                  - percent
+                  - per_1000_inhabitants
+      - name: cost_role
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: 
+                  - total
+                  - component
+                  - not_applicable
+
+
+  - name: regions
+    description: Mapping of region short names
+    config: 
+      column_types:
+        region_id: string
+    columns:
+      - name: region_id
+        data_tests:
+          - unique
+          - not_null

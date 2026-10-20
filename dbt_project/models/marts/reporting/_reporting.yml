@@ -1,0 +1,132 @@
+models:
+  - name: rpt_primary_care_costs_by_region
+    description: >
+      Primary care cost per inhabitant (SEK, nominal) by region and year: Kolada N71007 (total)
+      and its seven components (VI2000 activity codes). Grain: one row per KPI, region and year.
+      Includes Sweden (national) as a benchmark row, plus growth since the base year, deviation
+      from the national figure and each component's share of the region's total.
+      Amounts are per inhabitant, so they must be averaged, never summed, across regions or KPIs.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - kpi_id
+              - region_id
+              - period_start
+      # the total row is 100 % of itself
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "abs(share_of_region_total - 1) < 0.0001"
+          config:
+            where: "cost_role = 'total'"
+      # the national row never deviates from itself
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "deviation_from_national = 0"
+          config:
+            where: "is_national"
+      # every region and KPI starts at 1.0 in its base year
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "abs(growth_ratio_since_base_year - 1) < 0.0001"
+          config:
+            where: "period_year = base_year and amount_base_year != 0"
+    columns:
+      - name: kpi_id
+        description: Kolada KPI ID, e.g. N71007.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_kpi')
+                field: kpi_id
+
+      - name: kpi_name
+        description: Full English name of the KPI (unofficial translation of the Kolada title).
+
+      - name: kpi_short_name
+        description: Short English label for charts and legends, e.g. "GP care".
+
+      - name: kpi_description
+        description: English description of what the KPI measures and its source (unofficial translation).
+
+      - name: cost_role
+        description: >
+          'total' for N71007 (net cost of primary care, total), 'component' for the seven
+          cost KPIs that add up to it. Filter on this column to show either the total or the breakdown.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - total
+                  - component
+
+      - name: region_id
+        description: Kolada region code, four digits as a string ('0001' = Region Stockholm). '0000' is Sweden (national).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_region')
+                field: region_id
+
+      - name: region_name
+        description: Official region name as delivered by Kolada, e.g. "Region Stockholm" or "Riket" for the national row.
+
+      - name: region_short_name
+        description: Short region name for chart labels, e.g. "Stockholm" or "Sweden".
+
+      - name: region_display_name
+        description: Region name for display, with the national row shown as "Sweden (national)".
+
+      - name: is_national
+        description: True for the national row (region_id '0000'), used as a benchmark. Exclude it when comparing regions.
+
+      - name: period_start
+        description: First day of the reporting year (Kolada publishes these KPIs per calendar year).
+        data_tests:
+          - not_null
+
+      - name: period_year
+        description: Reporting year as an integer, derived from period_start.
+
+      - name: amount
+        description: Net cost in SEK per inhabitant for the KPI, region and year (nominal, not adjusted for inflation).
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+
+      - name: base_year
+        description: Earliest year with data for this KPI and region; the reference year for growth_ratio_since_base_year.
+
+      - name: amount_base_year
+        description: Amount for this KPI and region in the base year.
+
+      - name: region_total_amount
+        description: The region's total primary care cost (N71007) in the same year. Equal to amount on the total row.
+
+      - name: national_amount
+        description: The national (Sweden) amount for the same KPI and year.
+
+      - name: growth_ratio_since_base_year
+        description: >
+          Amount divided by amount_base_year (1.0 in the base year; 1.23 = 23 % higher than the base year).
+          Nominal, so it includes inflation. NULL when the base amount is 0.
+
+      - name: deviation_from_national
+        description: >
+          How far the region is above or below the national figure for the same KPI and year
+          (0.05 = 5 % above, -0.10 = 10 % below). Always 0 for the national row.
+
+      - name: share_of_region_total
+        description: >
+          Amount as a share of the region's total primary care cost (N71007) in the same year.
+          1.0 on the total row; the seven components add up to roughly 1.0.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1

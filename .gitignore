@@ -1,3 +1,4 @@
 .env
 *.json.key
 secrets/
+logs/
