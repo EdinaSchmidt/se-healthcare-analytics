@@ -16,6 +16,7 @@ WITH costs AS (
         ,fct.period_start
         ,EXTRACT(YEAR FROM fct.period_start) AS period_year
         ,MIN(EXTRACT(YEAR FROM fct.period_start)) OVER (PARTITION BY fct.region_id, fct.kpi_id) AS base_year
+        ,MAX(EXTRACT(YEAR FROM fct.period_start)) OVER () AS latest_year
         ,fct.amount
         ,FIRST_VALUE(fct.amount) OVER(PARTITION BY fct.region_id, fct.kpi_id ORDER BY fct.period_start) AS amount_base_year
 
@@ -57,6 +58,7 @@ SELECT
     ,costs.is_national
     ,costs.period_start
     ,costs.period_year
+    ,costs.period_year = costs.latest_year AS is_latest_year
     ,costs.amount
     ,costs.base_year
     ,costs.amount_base_year
