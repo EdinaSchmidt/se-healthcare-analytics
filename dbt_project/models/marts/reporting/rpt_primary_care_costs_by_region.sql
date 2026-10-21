@@ -65,8 +65,8 @@ SELECT
     ,region_totals.region_total_amount
     ,national.amount AS national_amount
 
-    -- growth ratio: each region and KPI against its own first year (=1.0)
-    ,SAFE_DIVIDE(costs.amount, costs.amount_base_year) AS growth_ratio_since_base_year
+    -- growth: each region and KPI against its own first year (0-1)
+    ,SAFE_DIVIDE(costs.amount, costs.amount_base_year) - 1 AS growth_since_base_year
 
     -- deviation from the national figure, same KPI and year (0.05 = 5 % above)
     ,SAFE_DIVIDE(costs.amount, national.amount) - 1 AS deviation_from_national
