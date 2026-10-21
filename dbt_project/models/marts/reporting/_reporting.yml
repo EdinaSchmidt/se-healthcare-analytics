@@ -25,10 +25,10 @@ models:
             expression: "deviation_from_national = 0"
           config:
             where: "is_national"
-      # every region and KPI starts at 1.0 in its base year
+      # every region and KPI starts at 0 growth in its base year
       - dbt_utils.expression_is_true:
           arguments:
-            expression: "abs(growth_ratio_since_base_year - 1) < 0.0001"
+            expression: "abs(growth_since_base_year) < 0.0001"
           config:
             where: "period_year = base_year and amount_base_year != 0"
     columns:
@@ -100,7 +100,7 @@ models:
                 min_value: 0
 
       - name: base_year
-        description: Earliest year with data for this KPI and region; the reference year for growth_ratio_since_base_year.
+        description: Earliest year with data for this KPI and region; the reference year for growth_since_base_year.
 
       - name: amount_base_year
         description: Amount for this KPI and region in the base year.
@@ -113,7 +113,8 @@ models:
 
       - name: growth_since_base_year
         description: >
-          Amount divided by amount_base_year (0.0 in the base year; 0.23 = 23 % higher than the base year).
+          Growth since the base year: amount divided by amount_base_year, minus 1
+          (0.0 in the base year; 0.23 = 23 % higher than the base year).
           Nominal, so it includes inflation. NULL when the base amount is 0.
 
       - name: deviation_from_national
