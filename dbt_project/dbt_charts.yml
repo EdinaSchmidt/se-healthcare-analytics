@@ -1,0 +1,5 @@
+sources:
+  reporting:
+    type: dbt_profile
+    profile: se_healthcare_analytics
+    target: prod

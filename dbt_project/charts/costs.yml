@@ -1,0 +1,523 @@
+title: "Primary care cost per inhabitant"
+notes: >
+  Swedish regions' net primary care cost per inhabitant (Kolada N71007 and its seven
+  components), SEK, nominal. Sweden (national) is the benchmark row, never a sum of regions.
+source: reporting
+theme: neon
+width: 1440
+style:
+  # keep authored casing: the theme's title case turns "SEK/inh" into "Sek/Inh"
+  title:
+    font: { case: none }
+  charts:
+    kpi:
+      label:
+        font: { case: none }
+    category_colors:
+      # Sweden is the benchmark: neutral near-white (neon's value ink), never a series hue.
+      # dbt-grays stops are absolute colors; revisit this pin if the board leaves a dark theme.
+      region_short_name:
+        values:
+          Sweden: dbt-grays.canvas
+      # chart 3: the palette's lead hues in national size order; inpatient care (near zero in most
+      # regions) gets the neutral gray so it recedes
+      kpi_short_name:
+        values:
+          GP care: category.blue
+          Nursing care: category.sky
+          Physio and occupational therapy: category.green
+          Other primary care: category.gold
+          Child health (BVC): category.orange
+          Maternal health (MVC): category.purple
+          Inpatient primary care: category.gray
+
+# Filters. The KPI cards ignore all of them on purpose. "Nominal / real" is not built yet:
+# it needs a CPI seed. Optional values are guarded with `is defined` because an unset
+# select is undefined in 0.9.1 (filter() is not null-safe for it).
+variables:
+  regions:
+    input: multiselect
+    label: "Region (trend)"
+    notes: Regions drawn on top of the Sweden benchmark in chart 1 (the trend) only. Empty selection shows Sweden only.
+    options: { query: region_options, column: region_short_name }
+    default: [Stockholm, Västra Götaland, Skåne]
+  year_from:
+    input: select
+    label: "From year"
+    notes: Lower bound of the year range for charts 1 and 4. Unset means the first year in the data.
+    data_type: number
+    options: { query: year_options, column: period_year }
+  year_to:
+    input: select
+    label: "To year"
+    notes: Upper bound of the year range for charts 1 and 4. Unset means the latest year in the data.
+    data_type: number
+    options: { query: year_options, column: period_year }
+
+queries:
+  region_options:
+    notes: Region names for the Region (trend) filter (national row excluded).
+    sql: |
+      SELECT DISTINCT region_short_name
+      FROM `se-healthcare-analytics.reporting.rpt_primary_care_costs_by_region`
+      WHERE NOT is_national
+      ORDER BY region_short_name
+
+  year_options:
+    notes: Years available in the mart, for the year-range filters.
+    sql: |
+      SELECT DISTINCT period_year
+      FROM `se-healthcare-analytics.reporting.rpt_primary_care_costs_by_region`
+      ORDER BY period_year
+
+  kpi_summary:
+    notes: >
+      One row for the KPI cards: Sweden's latest-year total and growth since the base year,
+      plus the highest, lowest and max/min spread across regions (national row excluded).
+      Ignores the board filters on purpose.
+    sql: |
+      WITH latest AS (
+        SELECT region_short_name, is_national, amount, growth_since_base_year, base_year, period_year
+        FROM `se-healthcare-analytics.reporting.rpt_primary_care_costs_by_region`
+        WHERE cost_role = 'total'
+          AND is_latest_year
+      ),
+      regions AS (
+        SELECT * FROM latest WHERE NOT is_national
+      ),
+      ranked AS (
+        SELECT
+          MAX_BY(region_short_name, amount) AS highest_region,
+          MIN_BY(region_short_name, amount) AS lowest_region,
+          MAX(amount) AS highest_amount,
+          MIN(amount) AS lowest_amount,
+          COUNT(*) AS region_count
+        FROM regions
+      )
+      SELECT
+        nat.amount AS sweden_amount,
+        nat.period_year AS latest_year,
+        nat.growth_since_base_year AS sweden_growth,
+        FORMAT('%d → %d', nat.base_year, nat.period_year) AS growth_period,
+        CONCAT(ranked.highest_region, ' / ', ranked.lowest_region) AS high_low_regions,
+        FORMAT("%'d / %'d", CAST(ROUND(ranked.highest_amount) AS INT64), CAST(ROUND(ranked.lowest_amount) AS INT64)) AS high_low_amounts,
+        ranked.highest_amount / ranked.lowest_amount AS spread,
+        ranked.region_count
+      FROM latest AS nat
+      CROSS JOIN ranked
+      WHERE nat.is_national
+
+  cost_trend:
+    notes: Total cost per inhabitant per year for Sweden (benchmark) plus the selected regions, within the year range.
+    sql: |
+      SELECT period_year, region_short_name, amount
+      FROM `se-healthcare-analytics.reporting.rpt_primary_care_costs_by_region`
+      WHERE cost_role = 'total'
+        AND (is_national{% if regions %} OR {{ filter('region_short_name', regions) }}{% endif %})
+        {% if year_from is defined and year_from %}AND period_year >= SAFE_CAST({{ year_from }} AS INT64){% endif %}
+        {% if year_to is defined and year_to %}AND period_year <= SAFE_CAST({{ year_to }} AS INT64){% endif %}
+      ORDER BY is_national DESC, region_short_name, period_year
+
+  cost_by_region_latest:
+    notes: >
+      Latest-year total cost per inhabitant per region (national row excluded), sorted by cost, with
+      Sweden's figure on every row for the reference line, the above/below-Sweden colour group, the
+      deviation for the tooltip and its label text. Two blank rows on top carry the Sweden label and
+      line the region rows up with chart 3 (Sweden bar + gap).
+    sql: |
+      WITH regions AS (
+        SELECT
+          region_short_name,
+          amount,
+          national_amount,
+          deviation_from_national,
+          -- rounded before formatting, so a tiny decline can't print as "−0 %"
+          CAST(ROUND(deviation_from_national * 100) AS INT64) AS deviation_pct
+        FROM `se-healthcare-analytics.reporting.rpt_primary_care_costs_by_region`
+        WHERE cost_role = 'total'
+          AND is_latest_year
+          AND NOT is_national
+      ),
+      labelled AS (
+        SELECT
+          *,
+          -- text, not a number format: d3 has no "+35 %" spacing and signs zero; U+2212 matches d3's minus
+          IF(deviation_pct = 0, '±0 %', REPLACE(FORMAT('%+d %%', deviation_pct), '-', '−')) AS deviation_label
+        FROM regions
+      )
+      SELECT
+        region_short_name,
+        2 + ROW_NUMBER() OVER (ORDER BY amount DESC, region_short_name) AS row_order,
+        amount,
+        national_amount,
+        IF(amount >= national_amount, 'Above Sweden', 'Below Sweden') AS direction,
+        -- tooltip only: the size of the difference, signed by which column holds it. Never negative,
+        -- because a negative value on the shared SEK scale makes it a mixed-sign axis (down to about
+        -- -8,000); + 0.0 turns ROUND's -0.0 into 0
+        IF(amount >= national_amount, ROUND(deviation_from_national, 2) + 0.0, NULL) AS above_sweden_by,
+        IF(amount >= national_amount, NULL, ROUND(-deviation_from_national, 2) + 0.0) AS below_sweden_by,
+        -- the label sits outside whichever ends further right, the bar or the dashed Sweden line,
+        -- so the line never runs through it: a bar label above Sweden, a line label below
+        IF(amount >= national_amount, deviation_label, '') AS bar_label,
+        IF(amount >= national_amount, '', deviation_label) AS line_label
+      FROM labelled
+      UNION ALL
+      -- blank band names (one and two spaces) keep the axis empty; NULL amount draws no bar
+      -- (direction must still be a real group: a NULL colour is rejected)
+      SELECT ' ', 1, NULL, ANY_VALUE(national_amount), 'Above Sweden', NULL, NULL, '',
+        FORMAT("Sweden %'d", CAST(ROUND(ANY_VALUE(national_amount)) AS INT64))
+      FROM regions
+      UNION ALL
+      SELECT '  ', 2, NULL, ANY_VALUE(national_amount), 'Above Sweden', NULL, NULL, '', ''
+      FROM regions
+      ORDER BY row_order
+
+  component_shares_latest:
+    notes: >
+      Latest-year share of each component in the region's total, for Sweden and every region.
+      Sweden is row 1, row 2 is a blank gap band, then the regions by total cost in the same order
+      as chart 2 (row_order 3..23). Zero-cost components stay as rows (share 0). Rows are ordered
+      by national component size so the stack order is stable.
+    sql: |
+      WITH components AS (
+        SELECT region_short_name, is_national, kpi_short_name, share_of_region_total, region_total_amount, national_amount
+        FROM `se-healthcare-analytics.reporting.rpt_primary_care_costs_by_region`
+        WHERE cost_role = 'component'
+          AND is_latest_year
+      )
+      SELECT
+        region_short_name,
+        IF(is_national, 1, 2 + DENSE_RANK() OVER (PARTITION BY is_national ORDER BY region_total_amount DESC, region_short_name)) AS row_order,
+        kpi_short_name,
+        share_of_region_total,
+        national_amount
+      FROM components
+      UNION ALL
+      -- gap band between Sweden and the regions: a blank name and NULL shares draw an empty row
+      SELECT ' ', 2, kpi_short_name, NULL, national_amount
+      FROM components
+      WHERE is_national
+      ORDER BY national_amount DESC, kpi_short_name, row_order
+
+  growth_since_base:
+    notes: >
+      Total cost per inhabitant, % change against the base year, per region and year (Sweden included).
+      The base year itself is left out: it is 0 % for every region by definition. Rows are ordered
+      Sweden first, then by growth in the last year shown (descending); row_weight bolds the Sweden row.
+    sql: |
+      WITH growth AS (
+        SELECT
+          period_year,
+          region_short_name,
+          is_national,
+          growth_since_base_year,
+          FIRST_VALUE(growth_since_base_year) OVER (PARTITION BY region_id ORDER BY period_year DESC) AS last_shown_growth
+        FROM `se-healthcare-analytics.reporting.rpt_primary_care_costs_by_region`
+        WHERE cost_role = 'total'
+          AND period_year > base_year
+          {% if year_from is defined and year_from %}AND period_year >= SAFE_CAST({{ year_from }} AS INT64){% endif %}
+          {% if year_to is defined and year_to %}AND period_year <= SAFE_CAST({{ year_to }} AS INT64){% endif %}
+      )
+      SELECT
+        CAST(period_year AS STRING) AS period_year,
+        region_short_name,
+        IF(is_national, '700', '400') AS row_weight,
+        -- ROUND alone returns -0.0 for tiny declines, which formats as "−0%"; + 0.0 turns it into +0
+        ROUND(growth_since_base_year, 2) + 0.0 AS growth_since_base_year
+      FROM growth
+      ORDER BY is_national DESC, last_shown_growth DESC, region_short_name, period_year
+
+charts:
+  kpi_sweden:
+    type: kpi
+    query: kpi_summary
+    label: "Sweden, latest year"
+    value: sweden_amount
+    notes: National cost per inhabitant in the latest year (total, N71007).
+    style:
+      value:
+        format: { spec: ",.0f", suffix: " SEK/inh" }
+    support:
+      value: latest_year
+      format: year
+      label: "SEK per inhabitant, nominal"
+
+  kpi_growth:
+    type: kpi
+    query: kpi_summary
+    label: "Sweden, change since base year"
+    value: sweden_growth
+    notes: Sweden's nominal growth in total cost per inhabitant from the base year to the latest year.
+    style:
+      value:
+        format: percent_delta
+    support:
+      value: growth_period
+      label: "nominal (no CPI adjustment)"
+
+  kpi_high_low:
+    type: kpi
+    query: kpi_summary
+    label: "Highest / lowest region, SEK/inh"
+    value: high_low_amounts
+    notes: Regions with the highest and lowest total cost per inhabitant in the latest year.
+    support:
+      value: high_low_regions
+
+  kpi_spread:
+    type: kpi
+    query: kpi_summary
+    label: "Spread (max ÷ min)"
+    value: spread
+    notes: Highest regional cost per inhabitant divided by the lowest, latest year.
+    style:
+      value:
+        format: { spec: ".2f", suffix: "×" }
+    support:
+      value: region_count
+      label: "regions compared, latest year"
+
+  cost_trend:
+    type: line
+    query: cost_trend
+    title: "1. Cost per inhabitant over time"
+    subtitle: "Sweden as benchmark, selected regions on top. SEK per inhabitant, nominal"
+    notes: Trend of total primary care cost per inhabitant; Sweden pinned to a neutral ink so it reads as the benchmark.
+    x: period_year
+    y: amount
+    color: region_short_name
+    x_label: "Year"
+    y_label: "SEK per inhabitant"
+    height: 300
+    # legend.values lists all regions so Sweden can lead; unselected ones are absent by design
+    warnings_ignore: [WARN-LEGEND-VALUES-UNRESOLVED]
+    style:
+      number_format: integer
+      # legend, not endpoint labels: in 0.9.1 the endpoint label ignores the Sweden pin
+      endpoint_labels:
+        visible: false
+      legend:
+        visible: true
+        position: top
+        direction: horizontal
+        title: { visible: false }
+        # Sweden first. `values` is an order *and* a filter in 0.9.1 (unlisted series lose their entry),
+        # so every region is listed; entries for unselected regions are skipped. Update if regions change.
+        values:
+          - Sweden
+          - Blekinge
+          - Dalarna
+          - Gotland
+          - Gävleborg
+          - Halland
+          - Jämtland Härjedalen
+          - Jönköping
+          - Kalmar
+          - Kronoberg
+          - Norrbotten
+          - Skåne
+          - Stockholm
+          - Sörmland
+          - Uppsala
+          - Värmland
+          - Västerbotten
+          - Västernorrland
+          - Västmanland
+          - Västra Götaland
+          - Örebro
+          - Östergötland
+      axis_y:
+        position: left
+
+  cost_by_region:
+    type: bar
+    query: cost_by_region_latest
+    title: "2. Breakdown by region"
+    subtitle: "Latest year, SEK per inhabitant, nominal. Colour and label show the difference from Sweden (dashed line)"
+    notes: >
+      Ranks regions by latest-year total cost per inhabitant against the national figure (dashed line);
+      colour, the label after each bar and the tooltip carry deviation_from_national (this chart
+      replaced the separate deviation chart).
+    x: region_short_name
+    y: amount
+    color: direction
+    x_label: "Region"
+    y_label: "SEK per inhabitant"
+    height: 400
+    # row_order = cost descending, after the two blank top rows
+    sort: { by: row_order, order: asc }
+    # name heuristic on national_amount wants a "$" format; SEK has no preset in 0.9.1,
+    # so the unit lives in the subtitle and the axis stays a plain integer.
+    # The tooltip-only % layers share the SEK scale on purpose (their points are invisible)
+    warnings_ignore: [WARN-LIKELY-CURRENCY-OR-PERCENT-MISSING-FORMATTER, WARN-LAYERED-CHART-SHARED-Y-AXIS-SCALE-MISMATCH]
+    style:
+      orientation: horizontal
+      # one bar per region: coincide instead of dodging by colour group
+      overlap: full
+      number_format: integer
+      # above / below Sweden. Neutral hues, not red/green: a higher cost per inhabitant is not by
+      # itself "bad". Set here, not in style.charts.category_colors: a chart with layers ignores those pins
+      color:
+        categorical:
+          palette: [dbt-seq-amber.5, dbt-seq-teal.5]
+      marks:
+        bar:
+          # compact: a horizontal bar's height has a floor of n_regions × (bar size + label gap),
+          # which overrides `height`; thinner bars and a smaller gap lower that floor
+          max_size: 12
+          # deviation label after bars that reach past the Sweden line ('' on the others)
+          labels:
+            visible: true
+            field: bar_label
+            position: above
+      axis_x: &compact_band_labels
+        labels: { min_gap: 3 }
+      axis_y:
+        # the layer label is appended to the measure title ("…, Sweden"); unit is in the subtitle
+        title: { visible: false }
+      # no legend: subtitle and signed labels explain the colour. Rows still line up with chart 3,
+      # whose legend sits on the right and takes no height
+      legend:
+        visible: false
+    layers:
+      - type: line
+        y: national_amount
+        label: "Sweden"
+        style:
+          marks:
+            line:
+              stroke: { color: dbt-grays.canvas, width: 2, dasharray: "4 3" }
+              # "Sweden 6,094" on the blank top row, and the deviation label of regions below Sweden
+              # just right of the line: as a bar label it would sit under the dashed line.
+              # '' on the other rows (NULL would print "null")
+              labels:
+                visible: true
+                field: line_label
+                position: right
+            point: { size: 0 }
+      # Tooltip rows only ("Above Sweden by 9%"), as invisible points near zero; each region has a
+      # value in one of the two. A layer's tooltip shows its own y in its axis_y.labels.format (0.9.1
+      # has no tooltip field list); a horizontal bar can't give a layer its own axis
+      - type: scatter
+        y: above_sweden_by
+        label: "Above Sweden by"
+        axis_y:
+          labels: { format: ".0%" }
+        style:
+          marks:
+            point: { size: 0 }
+      - type: scatter
+        y: below_sweden_by
+        label: "Below Sweden by"
+        axis_y:
+          labels: { format: ".0%" }
+        style:
+          marks:
+            point: { size: 0 }
+
+  component_shares:
+    type: bar
+    query: component_shares_latest
+    title: "3. Breakdown by component"
+    subtitle: "Latest year, share of each region's total primary care cost. Sweden on top, regions in chart 2's order"
+    notes: >
+      Each component's share of the region's total primary care cost (share_of_region_total) as 100 %
+      stacked bars, with Sweden as the national reference mix above a gap.
+    x: region_short_name
+    y: share_of_region_total
+    color: kpi_short_name
+    x_label: "Region"
+    height: 400
+    sort: { by: row_order, order: asc }
+    style:
+      orientation: horizontal
+      stack: normalize
+      stack_order: data
+      number_format: percent_whole
+      marks:
+        # same compact bars as chart 2
+        bar: { max_size: 12 }
+      axis_x: *compact_band_labels
+      axis_y:
+        title: { visible: false }
+      legend:
+        # right: a side legend takes no height, so the plot spans the same rows as chart 2's
+        # (a top legend here would be three rows tall and push the rows down)
+        position: right
+        direction: vertical
+        title: { visible: false }
+
+  # A heat table, not type: heatmap: the 0.9.1 heatmap cannot print values in its cells
+  # or format its color legend as a percent
+  growth_table:
+    type: table
+    query: growth_since_base
+    title: "4. Growth since base year"
+    subtitle: "Total cost per inhabitant, % change vs 2020, nominal. Sorted by latest growth, Sweden on top"
+    notes: >
+      Region × year growth against the base year as a heat table: teal = decline, orange = growth,
+      neutral at 0 %, on a symmetric ±55 % scale. Sweden is pinned as the bold, shaded first row.
+    rows: [region_short_name, row_weight]   # row_weight is a style input, hidden automatically
+    columns: [period_year]
+    values: [growth_since_base_year]
+    conditional_formatting:
+      region_short_name:
+        when:
+          - eq: Sweden
+            background: dbt-grays.heading
+    style:
+      symbol_mode: all
+      wrap: false
+      row: { height: 20 }
+      columns:
+        region_short_name: { label: "Region", width: 150, font: { weight: row_weight } }
+        growth_since_base_year:
+          format: { spec: "+.0%" }
+          align: center
+          font: { weight: row_weight }
+          # Diverging around 0 %, symmetric ±55 % (about the largest growth in the data), so a
+          # decline and a rise of the same size get the same intensity and no single outlier sets
+          # the scale. Fixed range so all year columns share one scale (values beyond clamp; the
+          # printed % stays exact). Inline stops: the named palette is pre-baked into muted stops.
+          # The arms are matched by luminance, not by stop number: this palette's teal side is much
+          # lighter than its orange side at the same index (mirrored .8/.9 made -19 % about 65 %
+          # brighter than +19 %). Teal .7/.8 ≈ orange .4/.3 in luminance (0.14/0.29 vs 0.16/0.25).
+          # The warm end stops at .3 so white text stays readable on it.
+          scale:
+            background:
+              palette: [dbt-div-orange-teal-dark.8, dbt-div-orange-teal-dark.7, dbt-div-orange-teal-dark.6, dbt-div-orange-teal-dark.4, dbt-div-orange-teal-dark.3]
+              min: -0.55
+              max: 0.55
+              hinge: 0
+            # dark text only at the teal end (below about -40 %; no cell today), where it beats white;
+            # conditional_formatting on the measure is not fanned out to pivot columns in 0.9.1,
+            # a second scale is. Stops every 11 points from -55 %
+            color:
+              palette: [dbt-grays.void, dbt-grays.void, dbt-grays.canvas, dbt-grays.canvas, dbt-grays.canvas, dbt-grays.canvas, dbt-grays.canvas, dbt-grays.canvas, dbt-grays.canvas, dbt-grays.canvas, dbt-grays.canvas]
+              min: -0.55
+              max: 0.55
+              hinge: 0
+
+rows:
+  - notes: Metric definition shown under the board title.
+    text: |
+      **Cost per inhabitant** is each region's net cost of primary care divided by all residents, not only patients. SEK, nominal (not adjusted for inflation).
+  - height: 120
+    cols: [kpi_sweden, kpi_growth, kpi_high_low, kpi_spread]
+  - cost_trend
+  - cols:
+      - cost_by_region
+      - component_shares
+  - growth_table
+  - notes: Methodology note on the N71007 metric, funding model and how to read regional differences.
+    # one paragraph per column: a single multi-column text block breaks paragraphs across columns
+    rows:
+      - text: "## About the data"
+      - cols:
+          - text: |
+              **What the metric measures.** Kolada KPI N71007: the region's net cost of primary care per inhabitant, covering both its own health centres and payments to private providers. Home healthcare and pharmaceuticals are excluded, and income such as patient fees is deducted. The seven components break this total into care types (GP care, nursing, physiotherapy/OT, maternity and child health care, inpatient primary care, other).
+          - text: |
+              **How the money flows.** Regions fund healthcare through regional taxes and pay health centres mainly per listed patient, weighted by care need. Costs therefore follow the population's needs and each region's reimbursement levels more than the number of visits.
+          - text: |
+              **How to read the differences.** Regional variation also reflects geography (sparse regions run more, smaller centres), age structure, and how each region classifies care as primary or hospital care. A higher cost does not by itself mean lower efficiency or better care.
+      - text: "Source: Kolada (RKA), 2020–2025."
