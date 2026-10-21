@@ -130,3 +130,7 @@ models:
               arguments:
                 min_value: 0
                 max_value: 1
+      - name: is_latest_year
+        description: True for the most recent year in the dataset (same year for all regions and KPIs). Use as a chart-level filter for latest-year visuals.
+        data_tests:
+          - not_null
