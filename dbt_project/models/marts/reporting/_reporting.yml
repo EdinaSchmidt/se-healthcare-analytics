@@ -111,9 +111,9 @@ models:
       - name: national_amount
         description: The national (Sweden) amount for the same KPI and year.
 
-      - name: growth_ratio_since_base_year
+      - name: growth_since_base_year
         description: >
-          Amount divided by amount_base_year (1.0 in the base year; 1.23 = 23 % higher than the base year).
+          Amount divided by amount_base_year (0.0 in the base year; 0.23 = 23 % higher than the base year).
           Nominal, so it includes inflation. NULL when the base amount is 0.
 
       - name: deviation_from_national
