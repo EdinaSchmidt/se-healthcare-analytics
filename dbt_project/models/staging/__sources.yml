@@ -42,3 +42,96 @@ sources:
               - unique
               - not_null
 
+  - name: npe
+    database: se-healthcare-analytics
+    schema: raw_patient_surveys
+    tables:
+      - name: response_rates
+        identifier: svarsfrekvens
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "svarsfrekvens"]
+
+      - name: overall_experience
+        identifier: helhetsupplevelse
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "helhetsupplevelse"]
+
+      - name: dimension_scores
+        identifier: dimensioner
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "dimensioner"]
+
+      - name: dimension_score_cis
+        identifier: dimensioner_ki
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "dimensioner_ki"]
+
+      - name: question_means
+        identifier: medelvarde
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "medelvarde"]
+
+      - name: question_mean_cis
+        identifier: medelvarde_ki
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "medelvarde_ki"]
+
+      - name: answer_distributions
+        identifier: fragesvar
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "fragesvar"]
+
+      - name: questions
+        identifier: fragor
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "fragor"]
+
+  - name: waiting_times
+    database: se-healthcare-analytics
+    schema: raw_waiting_times
+    tables:
+      - name: first_contact
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_waiting_times", "first_contact"]
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns:
+                  - region
+                  - vardcentral
+                  - typ
+                  - ar
+                  - manad
+
+      - name: medical_assessment
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_waiting_times", "medical_assessment"]
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns:
+                  - region
+                  - vardcentral
+                  - ar
+                  - manad
+

@@ -1,0 +1,378 @@
+title: "Money, region or health centre?"
+notes: >
+  Connects the three sources: do patients rate access higher where it is measurably faster (health
+  centres, NPE matched to the waiting-times exports), and do regions that spend more per inhabitant get
+  better access or experience (2025)?
+# source, theme, width, title casing and the Sweden colour pin come from the shared base
+extends: [../chart_styles/base.yml]
+
+queries:
+  kpi_summary:
+    notes: >
+      One row for the KPI cards: the health-centre match rate and the four correlations behind the
+      charts (Pearson, included centres or regions only).
+    sql: |
+      WITH centres AS (
+        SELECT *
+        FROM `se-healthcare-analytics.reporting.rpt_health_centre_access_experience`
+      ),
+      included AS (
+        SELECT * FROM centres WHERE is_included
+      ),
+      regions AS (
+        SELECT *
+        FROM `se-healthcare-analytics.reporting.rpt_region_spend_access_experience`
+        WHERE is_included
+      )
+      SELECT
+        (SELECT COUNTIF(is_matched) / COUNT(*) FROM centres) AS match_rate,
+        (SELECT FORMAT("%'d of %'d NPE centres; %'d compared", COUNTIF(is_matched), COUNT(*), COUNTIF(is_included)) FROM centres) AS match_label,
+        (SELECT CORR(within_3_days_share, accessibility_score) FROM included) AS r_assessment_accessibility,
+        (SELECT FORMAT("%'d health centres, %s", COUNT(*), ANY_VALUE(access_window_label)) FROM included) AS assessment_label,
+        (SELECT CORR(contacts_answered_share, accessibility_score) FROM included WHERE contacts_answered_share IS NOT NULL) AS r_contacts_accessibility,
+        (SELECT FORMAT("%'d health centres (no Stockholm data)", COUNT(*)) FROM included WHERE contacts_answered_share IS NOT NULL) AS contacts_label,
+        (SELECT CORR(cost_per_inhabitant, within_3_days_share) FROM regions) AS r_cost_access,
+        (SELECT CORR(cost_per_inhabitant, overall_experience_score) FROM regions) AS r_cost_experience,
+        (SELECT FORMAT('%d regions, %d', COUNT(*), ANY_VALUE(survey_year)) FROM regions) AS regions_label
+
+  centres_assessment:
+    notes: Included health centres' share assessed within 3 days (survey year) and NPE accessibility score.
+    sql: |
+      SELECT care_unit_name, region_short_name, within_3_days_share, accessibility_score
+      FROM `se-healthcare-analytics.reporting.rpt_health_centre_access_experience`
+      WHERE is_included
+
+  centres_contacts:
+    notes: Included health centres with first-contact data (not Stockholm), with their share of calls and chats answered and NPE accessibility score.
+    sql: |
+      SELECT care_unit_name, region_short_name, contacts_answered_share, accessibility_score
+      FROM `se-healthcare-analytics.reporting.rpt_health_centre_access_experience`
+      WHERE is_included
+        AND contacts_answered_share IS NOT NULL
+
+  access_fifths:
+    notes: >
+      Mean NPE score per fifth of included centres by share assessed within 3 days (slowest first),
+      for rated accessibility and overall experience, in long format for one line per measure.
+    sql: |
+      WITH fifths AS (
+        SELECT
+          access_quintile,
+          access_quintile_label,
+          FORMAT('%s\n%d–%d %%', access_quintile_label, CAST(FLOOR(MIN(within_3_days_share) * 100) AS INT64), CAST(FLOOR(MAX(within_3_days_share) * 100) AS INT64)) AS fifth,
+          AVG(accessibility_score) AS accessibility_score,
+          AVG(overall_experience_score) AS overall_experience_score
+        FROM `se-healthcare-analytics.reporting.rpt_health_centre_access_experience`
+        WHERE is_included
+        GROUP BY 1, 2
+      )
+      SELECT access_quintile, access_quintile_label, 'Rated accessibility' AS measure, accessibility_score AS mean_score FROM fifths
+      UNION ALL
+      SELECT access_quintile, access_quintile_label, 'Overall experience', overall_experience_score FROM fifths
+      ORDER BY measure DESC, access_quintile
+
+  matching:
+    notes: How the NPE health centres were matched to the waiting-times exports, by method.
+    sql: |
+      SELECT
+        CASE COALESCE(match_method, 'unmatched')
+          WHEN 'same_name' THEN 'Same name'
+          WHEN 'without_town' THEN 'Same name without the town'
+          WHEN 'manual' THEN 'Checked by hand (seed)'
+          ELSE 'Not matched'
+          END AS method,
+        COUNT(*) AS health_centres,
+        COUNT(*) / SUM(COUNT(*)) OVER () AS share
+      FROM `se-healthcare-analytics.reporting.rpt_health_centre_access_experience`
+      GROUP BY match_method
+      ORDER BY CASE COALESCE(match_method, 'unmatched') WHEN 'same_name' THEN 1 WHEN 'without_town' THEN 2 WHEN 'manual' THEN 3 ELSE 4 END
+
+  regions:
+    notes: Regions with cost, access and experience data for the survey year, plus Sweden as a reference point, with label text for the points far from Sweden.
+    sql: |
+      SELECT
+        region_short_name,
+        IF(is_national, 'Sweden', 'Region') AS point_kind,
+        cost_per_inhabitant,
+        within_3_days_share,
+        overall_experience_score,
+        -- names only where a point stands apart (the cluster around Sweden would overprint);
+        -- '' rather than NULL, which prints "null"
+        IF(is_national OR ABS(cost_vs_national) >= 0.12 OR ABS(within_3_days_vs_national) >= 0.08, region_short_name, '') AS access_label,
+        IF(is_national OR ABS(cost_vs_national) >= 0.12 OR ABS(overall_experience_vs_national) >= 2, region_short_name, '') AS experience_label
+      FROM `se-healthcare-analytics.reporting.rpt_region_spend_access_experience`
+      WHERE is_included OR is_national
+      ORDER BY is_national, region_short_name
+
+charts:
+  kpi_match:
+    type: kpi
+    query: kpi_summary
+    label: "Health centres matched"
+    value: match_rate
+    notes: Share of NPE health centres linked to a waiting-times unit by name (dim_care_unit).
+    style:
+      value:
+        format: percent
+    support:
+      value: match_label
+
+  kpi_assessment:
+    type: kpi
+    query: kpi_summary
+    label: "Centres: assessed in 3 days ↔ rated access"
+    value: r_assessment_accessibility
+    notes: Pearson correlation between a centre's share assessed within 3 days and its NPE accessibility score.
+    style:
+      value:
+        format: { spec: ".2f", prefix: "r = " }
+    support:
+      value: assessment_label
+
+  kpi_contacts:
+    type: kpi
+    query: kpi_summary
+    label: "Centres: calls answered ↔ rated access"
+    value: r_contacts_accessibility
+    notes: Pearson correlation between a centre's share of calls and chats answered and its NPE accessibility score.
+    style:
+      value:
+        format: { spec: ".2f", prefix: "r = " }
+    support:
+      value: contacts_label
+
+  kpi_cost_access:
+    type: kpi
+    query: kpi_summary
+    label: "Regions: cost ↔ assessed within 3 days"
+    value: r_cost_access
+    notes: Pearson correlation between a region's primary care cost per inhabitant and its share assessed within 3 days.
+    style:
+      value:
+        format: { spec: ".2f", prefix: "r = " }
+    support:
+      value: regions_label
+
+  kpi_cost_experience:
+    type: kpi
+    query: kpi_summary
+    label: "Regions: cost ↔ overall experience"
+    value: r_cost_experience
+    notes: Pearson correlation between a region's primary care cost per inhabitant and its NPE overall experience.
+    style:
+      value:
+        format: { spec: ".2f", prefix: "r = " }
+    support:
+      value: regions_label
+
+  centres_assessment:
+    type: scatter
+    query: centres_assessment
+    title: "1. Faster assessment, better rated access?"
+    subtitle: "Each dot is a health centre: share assessed within 3 days (Jul–Dec 2025) against its NPE accessibility score"
+    notes: Centre-level scatter of measured assessment speed against patients' accessibility rating; a weak link (see the KPI card).
+    x: within_3_days_share
+    y: accessibility_score
+    x_label: "Assessed within 3 days"
+    y_label: "Rated accessibility (0–100)"
+    height: 360
+    style:
+      number_format: integer
+      color:
+        categorical:
+          palette: [dbt-seq-teal.5]
+      marks:
+        point:
+          size: 30
+          opacity: 0.5
+      axis_x:
+        labels: { format: ".0%" }
+        # no automatic 100 % reference rule: it read as a stray axis line at the edge
+        grid: { threshold: { visible: false } }
+        scale:
+          continuous:
+            domain: [0.2, 1.0]
+      axis_y:
+        position: left
+      legend:
+        visible: false
+
+  centres_contacts:
+    type: scatter
+    query: centres_contacts
+    title: "2. Calls answered, better rated access?"
+    subtitle: "Each dot is a health centre: share of calls and chats answered (Jul–Dec 2025) against its NPE accessibility score"
+    notes: Centre-level scatter of answered contacts against patients' accessibility rating; a clearly stronger link than chart 1.
+    x: contacts_answered_share
+    y: accessibility_score
+    x_label: "Calls and chats answered"
+    y_label: "Rated accessibility (0–100)"
+    height: 360
+    style:
+      number_format: integer
+      color:
+        categorical:
+          palette: [dbt-seq-teal.5]
+      marks:
+        point:
+          size: 30
+          opacity: 0.5
+      axis_x:
+        labels: { format: ".0%" }
+        # no automatic 100 % reference rule: it read as a stray axis line at the edge
+        grid: { threshold: { visible: false } }
+        scale:
+          continuous:
+            domain: [0.2, 1.0]
+      axis_y:
+        position: left
+      legend:
+        visible: false
+
+  access_fifths:
+    type: line
+    query: access_fifths
+    title: "3. NPE scores by access fifth"
+    subtitle: "Mean score of the health centres in each fifth by share assessed within 3 days, slowest fifth first"
+    notes: >
+      Included centres split into five equal groups by share assessed within 3 days; the mean NPE
+      accessibility and overall experience score per group.
+    x: access_quintile_label
+    y: mean_score
+    color: measure
+    x_label: "Health centres by share assessed within 3 days"
+    y_label: "Mean score (0–100)"
+    height: 300
+    sort: { by: access_quintile, order: asc }
+    style:
+      number_format: integer
+      color:
+        categorical:
+          palette: [dbt-seq-amber.5, dbt-seq-teal.5]
+      marks:
+        line:
+          labels:
+            visible: true
+            format: ".1f"
+            position: top
+      axis_y:
+        scale:
+          continuous:
+            domain: [74, 84]
+      # the line-end labels name the two series
+      legend:
+        visible: false
+
+  matching:
+    type: table
+    query: matching
+    title: "4. How the health centres were matched"
+    subtitle: "NPE names its centres (with HSA-ID); the waiting-times exports only name them. Matching is by name within the region"
+    notes: NPE health centres by how they were linked to a waiting-times unit (int_care_unit_matches).
+    style:
+      symbol_mode: all
+      columns:
+        method: { label: "Method", width: 240 }
+        health_centres: { label: "Health centres", format: { spec: ",d" }, align: right }
+        share: { label: "Share", format: { spec: ".1%" }, align: right }
+
+  regions_cost_access:
+    type: scatter
+    query: regions
+    title: "5. Cost per inhabitant and access, by region"
+    subtitle: "2025 cost per inhabitant (SEK, nominal) against share assessed within 3 days, Jul–Dec. White = Sweden; named = far from it"
+    notes: Region-level scatter of cost against access; no visible link (see the KPI card).
+    x: cost_per_inhabitant
+    y: within_3_days_share
+    color: point_kind
+    x_label: "Cost per inhabitant, SEK"
+    y_label: "Assessed within 3 days"
+    height: 380
+    warnings_ignore: [WARN-LIKELY-CURRENCY-OR-PERCENT-MISSING-FORMATTER]
+    style:
+      number_format: percent_whole
+      color:
+        categorical:
+          palette: [dbt-seq-teal.5, dbt-grays.canvas]
+      marks:
+        point:
+          size: 70
+          opacity: 0.9
+          labels:
+            visible: true
+            field: access_label
+            position: right
+      axis_x:
+        labels: { format: ",.0f" }
+        scale:
+          continuous:
+            domain: [4500, 8500]
+      axis_y:
+        position: left
+        # no automatic 100 % reference rule: it read as a stray axis line at the edge
+        grid: { threshold: { visible: false } }
+      legend:
+        visible: false
+
+  regions_cost_experience:
+    type: scatter
+    query: regions
+    title: "6. Cost per inhabitant and experience, by region"
+    subtitle: "2025 cost per inhabitant (SEK, nominal) against overall experience, 0–100. White = Sweden; named = far from it"
+    notes: Region-level scatter of cost against overall experience; a modest positive link driven by a few sparse, high-cost regions.
+    x: cost_per_inhabitant
+    y: overall_experience_score
+    color: point_kind
+    x_label: "Cost per inhabitant, SEK"
+    y_label: "Overall experience (0–100)"
+    height: 380
+    warnings_ignore: [WARN-LIKELY-CURRENCY-OR-PERCENT-MISSING-FORMATTER]
+    style:
+      number_format: integer
+      color:
+        categorical:
+          palette: [dbt-seq-teal.5, dbt-grays.canvas]
+      marks:
+        point:
+          size: 70
+          opacity: 0.9
+          labels:
+            visible: true
+            field: experience_label
+            position: right
+      axis_x:
+        labels: { format: ",.0f" }
+        scale:
+          continuous:
+            domain: [4500, 8500]
+      axis_y:
+        position: left
+      legend:
+        visible: false
+
+rows:
+  - notes: How the board answers the headline question.
+    text: |
+      **How to read this board.** The access board shows how much of the variation between health centres lies between regions. Here, charts 1–4 ask whether patients notice measured access at their own centre, and charts 5–6 whether the regions that spend more per inhabitant do better. A correlation (r) near 0 means no linear link, near 1 a strong one.
+  - height: 120
+    cols: [kpi_match, kpi_assessment, kpi_contacts, kpi_cost_access, kpi_cost_experience]
+  - cols:
+      - centres_assessment
+      - centres_contacts
+  - cols:
+      - access_fifths
+      - matching
+  - cols:
+      - regions_cost_access
+      - regions_cost_experience
+  - notes: Methodology note on the matching, the windows and what the correlations can and cannot say.
+    rows:
+      - text: "## About the data"
+      - cols:
+          - text: |
+              **How centres are linked.** NPE identifies health centres by HSA-ID; the waiting-times exports only give a name. Names are matched within the region after harmless clean-up (case, a trailing town, "ARKIVERAD", Värmland's "Allmänmedicinska mottagningen" prefix), plus a short hand-checked list. Centres that one source splits and the other merges stay unmatched.
+          - text: |
+              **Which months and centres.** NPE 2025 is compared with the waiting-times months of 2025 (July–December), the only overlap. Centres need a match, at least 250 assessments in those months and published NPE scores. Cost is Kolada's net primary care cost per inhabitant for 2025, nominal.
+          - text: |
+              **What it can and cannot say.** These are associations, not causes. With 20 regions one or two outliers move the correlation a lot, and sparse northern regions have both higher costs and different access. Rated accessibility comes from two questions (waiting time for a visit, getting in touch), so it covers the phone as much as the wait.
+      - text: "Sources: SKR (NPE 2025), Socialstyrelsen (waiting times), Kolada (RKA)."

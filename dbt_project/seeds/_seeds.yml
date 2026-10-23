@@ -56,3 +56,100 @@ seeds:
           NULL where the region has no survey results.
         data_tests:
           - unique
+
+  - name: npe_question_translations
+    description: >
+      Unofficial English translations of the NPE primary care questions, matched to
+      stg_npe__questions on the exact Swedish question text rather than the question
+      number, which can change between survey rounds. A new or reworded question has
+      no match and fails the not_null test on dim_npe_question.question_text.
+    columns:
+      - name: question_text_sv
+        data_tests:
+          - unique
+          - not_null
+      - name: question_text
+        data_tests:
+          - not_null
+      - name: question_short_name
+        data_tests:
+          - not_null
+
+  - name: npe_answer_translations
+    description: >
+      Unofficial English translations of the NPE answer options, matched on the exact
+      Swedish answer text. One row per distinct text, shared by every question that uses it.
+    columns:
+      - name: answer_text_sv
+        data_tests:
+          - unique
+          - not_null
+      - name: answer_text
+        data_tests:
+          - not_null
+
+  - name: npe_dimension_translations
+    description: >
+      English names for the NPE dimensions, matched on the Swedish dimension name.
+      dimension_code is the column prefix used in stg_npe__dimension_scores.
+    columns:
+      - name: dimension_sv
+        data_tests:
+          - unique
+          - not_null
+      - name: dimension_code
+        data_tests:
+          - unique
+          - not_null
+      - name: dimension_name
+        data_tests:
+          - not_null
+
+  - name: npe_survey_translations
+    description: English labels for the NPE survey's measurement and selection, matched on the Swedish values.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - measurement_sv
+              - selection_sv
+    columns:
+      - name: measurement
+        data_tests:
+          - not_null
+      - name: selection
+        data_tests:
+          - not_null
+
+  - name: care_unit_match_overrides
+    description: >
+      Hand-checked links between an NPE health centre (HSA-ID) and a waiting-times unit name that the
+      automatic name matching in int_care_unit_matches misses, e.g. 'husläkarmottagning' in one source
+      and 'vårdcentral' in the other. Only pairs whose distinctive name and region agree; units that
+      one source splits and the other merges stay unmatched. npe_name and note are for reading only.
+    config:
+      column_types:
+        region_id: string
+        hsa_id: string
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - region_id
+              - waiting_times_name
+    columns:
+      - name: hsa_id
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_npe__health_centres')
+                field: hsa_id
+      - name: waiting_times_name
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_waiting_times__unit_names')
+                field: waiting_times_name

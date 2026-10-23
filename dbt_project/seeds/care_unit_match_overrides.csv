@@ -1,0 +1,11 @@
+region_id,hsa_id,npe_name,waiting_times_name,note
+0001,SE2321000016-9TJG,Arenastadens Vårdcentral,Arenastadens vårdcentral Solna,Town appended without a comma
+0001,SE2321000016-D22K,Capio Vårdcentral Kista allmänmedicin,Capio Vårdcentral Kista,NPE adds 'allmänmedicin'
+0001,SE2321000016-F3N0,Doktor.se Norra Djurgårdens husläkarmottagning,Doktor.se Norra Djurgårdens vårdcentral,'husläkarmottagning' vs 'vårdcentral'
+0001,SE2321000016-GDW1,Familjeläkarna Akalla Husläkarmottagning,Familjeläkarna Akalla Vårdcentral,'Husläkarmottagning' vs 'Vårdcentral'
+0001,SE2321000016-BG3J,Familjeläkarna Tungelsta husläkarverksamhet,Familjeläkarna Tungelsta Vårdcentral,'husläkarverksamhet' vs 'Vårdcentral'
+0001,SE2321000016-C0Z8,Familjeläkarna i Barkarby Husläkarverksamhet,Familjeläkarna Barkarby Vårdcentral,'i ... Husläkarverksamhet' vs 'Vårdcentral'
+0001,SE2321000016-4J47,Familjeläkarna i Saltsjöbaden husläkarverksamhet,Familjeläkarna i Saltsjöbaden Vårdcentral,'husläkarverksamhet' vs 'Vårdcentral'
+0001,SE2321000016-60PR,Famläk Husby Husläkarverksamhet,Familjeläkarna Husby Vårdcentral,NPE abbreviates 'Familjeläkarna'
+0003,SE162321000024-0026127,Kåbohälsan,"Kåbohälsan vårdcentral, Uppsala",NPE leaves out 'vårdcentral'
+0012,SE162321000255-O15785,Brahehälsan Löberöd,Vårdcentralen Brahehälsan Löberöd,NPE leaves out 'Vårdcentralen'

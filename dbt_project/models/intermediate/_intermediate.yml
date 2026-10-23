@@ -1,0 +1,99 @@
+models:
+  - name: int_npe__health_centres
+    description: One row per NPE health centre (HSA-ID) with its Kolada region code, from the latest survey it appears in.
+    columns:
+      - name: hsa_id
+        data_tests:
+          - unique
+          - not_null
+      - name: region_id
+        data_tests:
+          - not_null
+
+  - name: int_waiting_times__unit_names
+    description: >
+      One row per care unit named in the waiting-times exports (medical assessment or first contact),
+      with its Kolada region code. The exports carry no unit ID, so region + name is the key and
+      waiting_times_unit_id is a hash of the two.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - region_id
+              - waiting_times_name
+    columns:
+      - name: waiting_times_unit_id
+        data_tests:
+          - unique
+          - not_null
+      - name: region_id
+        data_tests:
+          - not_null
+
+  - name: int_care_unit_matches
+    description: >
+      One-to-one links between NPE health centres (HSA-ID) and waiting-times units (name only):
+      automatic name matching within the region (same_name, without_town) plus the hand-checked
+      pairs in the care_unit_match_overrides seed (manual). Unmatched units have no row.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - region_id
+              - waiting_times_name
+    columns:
+      - name: hsa_id
+        data_tests:
+          - unique
+          - not_null
+      - name: match_method
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [same_name, without_town, manual]
+
+  - name: int_npe__dimension_scores
+    description: NPE dimension scores in long form, one row per survey, unit and dimension; suppressed units have no rows.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - period_start
+              - measurement_sv
+              - selection_sv
+              - aggregation_level
+              - region_id
+              - municipality_name
+              - hsa_id
+              - dimension_code
+    columns:
+      - name: region_id
+        data_tests:
+          - not_null
+      - name: dimension_code
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('npe_dimension_translations')
+                field: dimension_code
+
+  - name: int_npe__question_scores
+    description: >
+      NPE question scores in long form, one row per survey, unit and scored question (questions with
+      an answer scale); suppressed units have no rows.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - period_start
+              - measurement_sv
+              - selection_sv
+              - aggregation_level
+              - region_id
+              - municipality_name
+              - hsa_id
+              - question_number
+    columns:
+      - name: region_id
+        data_tests:
+          - not_null
