@@ -34,8 +34,25 @@ seeds:
     config: 
       column_types:
         region_id: string
+        region_short_name: string
+        region_waiting_times: string
     columns:
       - name: region_id
         data_tests:
           - unique
           - not_null
+      - name: region_waiting_times
+        description: >
+          Region name exactly as spelled in Socialstyrelsen's waiting-times extracts
+          (e.g. 'Södermanland', 'Alla regioner' for the national row). Used to map
+          waiting-times rows to region_id.
+        data_tests:
+          - unique
+          - not_null
+      - name: region_patient_surveys
+        description: >
+          Region name exactly as spelled in SKR's NPE primary care tables
+          ('Alla' for the national row; 'Jämtland' without Härjedalen).
+          NULL where the region has no survey results.
+        data_tests:
+          - unique
