@@ -2,23 +2,11 @@ title: "Primary care cost per inhabitant"
 notes: >
   Swedish regions' net primary care cost per inhabitant (Kolada N71007 and its seven
   components), SEK, nominal. Sweden (national) is the benchmark row, never a sum of regions.
-source: reporting
-theme: neon
-width: 1440
+# source, theme, width, title casing and the Sweden colour pin come from the shared base
+extends: [../chart_styles/base.yml]
 style:
-  # keep authored casing: the theme's title case turns "SEK/inh" into "Sek/Inh"
-  title:
-    font: { case: none }
   charts:
-    kpi:
-      label:
-        font: { case: none }
     category_colors:
-      # Sweden is the benchmark: neutral near-white (neon's value ink), never a series hue.
-      # dbt-grays stops are absolute colors; revisit this pin if the board leaves a dark theme.
-      region_short_name:
-        values:
-          Sweden: dbt-grays.canvas
       # chart 3: the palette's lead hues in national size order; inpatient care (near zero in most
       # regions) gets the neutral gray so it recedes
       kpi_short_name:

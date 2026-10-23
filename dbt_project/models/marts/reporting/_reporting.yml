@@ -135,3 +135,438 @@ models:
         description: True for the most recent year in the dataset (same year for all regions and KPIs). Use as a chart-level filter for latest-year visuals.
         data_tests:
           - not_null
+
+  - name: rpt_access_by_region_month
+    description: >
+      Care guarantee follow-up per region and month (Socialstyrelsen's waiting-times exports, region
+      totals): share of patients assessed the same day and within 3 days, and share of calls and chats
+      answered, against Sweden and the same month a year earlier. Grain: one row per region (Sweden
+      included) and month; a region without data that month has a row with NULL measures. Shares are
+      0-1; differences are in share points (0.02 = 2 percentage points). Region totals include units
+      of every type (out-of-hours clinics too). Stockholm has no first-contact data.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - region_id
+              - period_start
+    columns:
+      - name: region_id
+        description: Kolada region code; '0000' is Sweden.
+        data_tests:
+          - not_null
+      - name: region_short_name
+        description: Short region name, 'Sweden' for the national row.
+      - name: is_national
+        description: True for Sweden.
+      - name: period_start
+        description: First day of the month.
+        data_tests:
+          - not_null
+      - name: period_label
+        description: Month as text, e.g. 'Jul 2025'.
+      - name: is_latest_month
+        description: True for the latest month in the exports.
+      - name: has_assessment_data
+        description: False when the region reported no medical assessments that month.
+      - name: has_contact_data
+        description: False when the region reported no first contacts that month.
+      - name: total_assessments
+        description: Patients assessed in the month (all waits).
+      - name: assessed_same_day
+        description: Patients assessed the same day they made contact.
+      - name: assessed_within_3_days
+        description: Patients assessed within 3 days (includes the same day).
+      - name: chose_to_wait_longer
+        description: Patients who chose to wait longer than offered; counted in total_assessments.
+      - name: wait_days_mean
+        description: Mean wait to assessment in days.
+      - name: wait_days_median
+        description: Median wait to assessment in days.
+      - name: wait_days_p90
+        description: 90th percentile of the wait to assessment in days.
+      - name: answered_contacts
+        description: Calls and chats answered.
+      - name: total_contacts
+        description: Calls and chats received.
+      - name: same_day_share
+        description: assessed_same_day / total_assessments.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: within_3_days_share
+        description: assessed_within_3_days / total_assessments; the care guarantee's 3-day measure.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: contacts_answered_share
+        description: answered_contacts / total_contacts.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: national_same_day_share
+        description: Sweden's same_day_share in the same month.
+      - name: national_within_3_days_share
+        description: Sweden's within_3_days_share in the same month.
+      - name: national_contacts_answered_share
+        description: Sweden's contacts_answered_share in the same month.
+      - name: same_day_vs_national
+        description: same_day_share minus Sweden's, in share points.
+      - name: within_3_days_vs_national
+        description: within_3_days_share minus Sweden's, in share points.
+      - name: contacts_answered_vs_national
+        description: contacts_answered_share minus Sweden's, in share points.
+      - name: same_day_share_previous_year
+        description: same_day_share in the same month a year earlier (NULL before the exports cover it).
+      - name: within_3_days_share_previous_year
+        description: within_3_days_share in the same month a year earlier.
+      - name: contacts_answered_share_previous_year
+        description: contacts_answered_share in the same month a year earlier.
+      - name: same_day_change_vs_previous_year
+        description: Change in same_day_share against the same month a year earlier, in share points.
+      - name: within_3_days_change_vs_previous_year
+        description: Change in within_3_days_share against the same month a year earlier, in share points.
+      - name: contacts_answered_change_vs_previous_year
+        description: Change in contacts_answered_share against the same month a year earlier, in share points.
+
+  - name: rpt_access_by_health_centre
+    description: >
+      Medical assessment per care unit over the latest 12 months of the waiting-times exports, for
+      comparing centres within and between regions. Grain: one row per care unit with data in the
+      window. Shares are 0-1 and volume-weighted (counts summed over the window, then divided).
+    data_tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "unit_type = 'health_centre' AND total_assessments >= 250"
+          config:
+            where: "is_included"
+    columns:
+      - name: care_unit_id
+        description: dim_care_unit key.
+        data_tests:
+          - unique
+          - not_null
+      - name: care_unit_name
+        description: Unit name (NPE's spelling when matched, otherwise the export's).
+      - name: unit_type
+        description: dim_care_unit.unit_type.
+      - name: region_id
+        description: Kolada region code.
+      - name: region_short_name
+        description: Short region name.
+      - name: window_start
+        description: First month of the 12-month window.
+      - name: window_end
+        description: Last month of the window (the latest month in the exports).
+      - name: window_label
+        description: The window as text, e.g. 'Sep 2025 – Aug 2026'.
+      - name: months_with_data
+        description: Months in the window with published counts (suppressed or unreported months are missing).
+      - name: total_assessments
+        description: Patients assessed in the window (complete months only).
+      - name: assessed_within_3_days
+        description: Patients assessed within 3 days in the window.
+      - name: assessed_same_day
+        description: Patients assessed the same day in the window.
+      - name: within_3_days_share
+        description: assessed_within_3_days / total_assessments.
+      - name: same_day_share
+        description: assessed_same_day / total_assessments.
+      - name: is_included
+        description: >
+          True for the units the comparisons use: health centres with at least 250 assessments in the
+          window, so one centre's share is precise to about ±2.5 share points.
+        data_tests:
+          - not_null
+      - name: region_within_3_days_share
+        description: Pooled within_3_days_share of the region's included centres (NULL on excluded rows).
+      - name: national_within_3_days_share
+        description: Pooled within_3_days_share of all included centres (NULL on excluded rows).
+
+  - name: rpt_access_variation_by_region
+    description: >
+      Spread of the share assessed within 3 days between the included health centres of each region
+      (rpt_access_by_health_centre, latest 12 months), plus a volume-weighted split of all variation
+      between centres into a between-region and a within-region part (the two shares add up to 1).
+      Grain: one row per region with included centres, plus Sweden (all included centres).
+    data_tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "abs(between_region_variance_share + within_region_variance_share - 1) < 0.0001"
+    columns:
+      - name: region_id
+        description: Kolada region code; '0000' is Sweden (all included centres).
+        data_tests:
+          - unique
+          - not_null
+      - name: region_short_name
+        description: Short region name.
+      - name: is_national
+        description: True for Sweden.
+      - name: centres_included
+        description: Included health centres.
+      - name: total_assessments
+        description: Their patients assessed in the window.
+      - name: within_3_days_share
+        description: Pooled share assessed within 3 days of the included centres.
+      - name: national_within_3_days_share
+        description: The same for all of Sweden.
+      - name: within_3_days_vs_national
+        description: within_3_days_share minus Sweden's, in share points.
+      - name: min_share
+        description: Lowest centre share in the region.
+      - name: p10_share
+        description: 10th percentile of the centres' shares (each centre counted once, not weighted).
+      - name: p25_share
+        description: 25th percentile of the centres' shares.
+      - name: median_share
+        description: Median centre share.
+      - name: p75_share
+        description: 75th percentile of the centres' shares.
+      - name: p90_share
+        description: 90th percentile of the centres' shares.
+      - name: max_share
+        description: Highest centre share in the region.
+      - name: p10_p90_range
+        description: p90_share minus p10_share, in share points.
+      - name: sd_share
+        description: Volume-weighted standard deviation of the centres' shares around the region's pooled share.
+      - name: between_region_variance_share
+        description: Share of all variation between centres that lies between regions (same value on every row).
+      - name: within_region_variance_share
+        description: Share of all variation between centres that lies within regions (same value on every row).
+      - name: centre_sd
+        description: Volume-weighted standard deviation of all centres around Sweden's share.
+      - name: between_region_sd
+        description: Square root of the between-region variance.
+      - name: within_region_sd
+        description: Square root of the within-region variance.
+      - name: window_label
+        description: The 12-month window as text.
+
+  - name: rpt_experience_by_region
+    description: >
+      Patient experience per region from NPE (SKR's own region aggregates): overall experience and the
+      six dimensions, against Sweden, plus how many of the region's health centres score clearly below
+      or above Sweden. Grain: one row per survey, region (Sweden included) and measure. Scores 0-100.
+      "Clearly" = the whole confidence interval lies on one side of Sweden's score. Sörmland has no results.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - period_start
+              - region_id
+              - measure_code
+    columns:
+      - name: period_start
+        description: First day of the survey year.
+      - name: survey_year
+        description: Survey year.
+      - name: region_id
+        description: Kolada region code; '0000' is Sweden.
+        data_tests:
+          - not_null
+      - name: region_short_name
+        description: Short region name.
+      - name: is_national
+        description: True for Sweden.
+      - name: measure_code
+        description: "'overall_experience' or a dimension code (npe_dimension_translations)."
+        data_tests:
+          - not_null
+      - name: measure_name
+        description: English measure name.
+      - name: measure_order
+        description: 0 = overall experience, then the dimensions in the questionnaire's order.
+      - name: score
+        description: Score 0-100.
+        data_tests:
+          - not_null
+      - name: ci
+        description: Confidence interval half-width as published by NPE (score ± ci).
+      - name: national_score
+        description: Sweden's score for the same measure.
+      - name: deviation_from_national
+        description: score minus Sweden's, in points.
+      - name: comparison_to_national
+        description: "'Clearly above Sweden', 'Clearly below Sweden' or 'Not clearly different'; NULL for Sweden."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [Clearly above Sweden, Clearly below Sweden, Not clearly different]
+      - name: centres_scored
+        description: The region's health centres with a published score for the measure (all of Sweden's on the Sweden row).
+      - name: centres_clearly_below_national
+        description: Of those, centres whose whole interval lies below Sweden's score.
+      - name: centres_clearly_above_national
+        description: Of those, centres whose whole interval lies above Sweden's score.
+      - name: share_of_centres_clearly_below_national
+        description: centres_clearly_below_national / centres_scored.
+
+  - name: rpt_experience_by_question
+    description: >
+      Patient experience per region and scored question (NPE region aggregates) against Sweden, to see
+      which questions pull a region's dimension scores down. Grain: one row per survey, region (Sweden
+      included) and question. Scores 0-100.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - period_start
+              - region_id
+              - question_number
+    columns:
+      - name: period_start
+        description: First day of the survey year.
+      - name: survey_year
+        description: Survey year.
+      - name: region_id
+        description: Kolada region code; '0000' is Sweden.
+        data_tests:
+          - not_null
+      - name: region_short_name
+        description: Short region name.
+      - name: is_national
+        description: True for Sweden.
+      - name: question_number
+        description: Question number in the survey.
+      - name: question_short_name
+        description: Short English label (npe_question_translations).
+        data_tests:
+          - not_null
+      - name: question_text
+        description: English question text.
+      - name: dimension_code
+        description: The question's dimension.
+      - name: dimension_name
+        description: English dimension name.
+      - name: score
+        description: Score 0-100.
+      - name: ci
+        description: Confidence interval half-width as published by NPE.
+      - name: national_score
+        description: Sweden's score for the question.
+      - name: deviation_from_national
+        description: score minus Sweden's, in points.
+      - name: rank_in_region
+        description: 1 = the region's lowest-scoring question.
+
+  - name: rpt_health_centre_access_experience
+    description: >
+      Measured access next to patient experience per NPE health centre: the survey year's waiting-times
+      months (July-December 2025 for the 2025 survey) against the NPE scores. Grain: one row per NPE
+      health centre of the latest survey, matched to the waiting-times exports or not, so the match rate
+      can be read here. Shares 0-1, scores 0-100.
+    data_tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "is_matched AND total_assessments >= 250 AND access_quintile IS NOT NULL"
+          config:
+            where: "is_included"
+    columns:
+      - name: care_unit_id
+        description: HSA-ID.
+        data_tests:
+          - unique
+          - not_null
+      - name: care_unit_name
+        description: NPE's name for the centre.
+      - name: region_id
+        description: Kolada region code.
+      - name: region_short_name
+        description: Short region name.
+      - name: is_matched
+        description: True when the centre was matched to a waiting-times unit.
+        data_tests:
+          - not_null
+      - name: match_method
+        description: "'same_name', 'without_town' or 'manual' (int_care_unit_matches); NULL when unmatched."
+      - name: respondents
+        description: NPE respondents.
+      - name: response_rate_pct
+        description: NPE response rate, %.
+      - name: overall_experience_score
+        description: NPE overall experience, 0-100.
+      - name: overall_experience_ci
+        description: Its confidence interval half-width.
+      - name: accessibility_score
+        description: NPE accessibility dimension (waiting time for a visit, getting in touch), 0-100.
+      - name: accessibility_ci
+        description: Its confidence interval half-width.
+      - name: months_with_assessment_data
+        description: Months in the window with published assessment counts.
+      - name: total_assessments
+        description: Patients assessed in the window.
+      - name: within_3_days_share
+        description: Share assessed within 3 days in the window.
+      - name: same_day_share
+        description: Share assessed the same day in the window.
+      - name: total_contacts
+        description: Calls and chats in the window (NULL in Stockholm, which has no first-contact data).
+      - name: contacts_answered_share
+        description: Share of calls and chats answered in the window.
+      - name: is_included
+        description: Matched, at least 250 assessments in the window and both NPE scores published.
+        data_tests:
+          - not_null
+      - name: access_quintile
+        description: 1-5 among included centres by within_3_days_share (1 = the slowest fifth); NULL when not included.
+      - name: access_quintile_label
+        description: Quintile as text, 'Slowest fifth' … 'Fastest fifth'.
+      - name: survey_year
+        description: NPE survey year.
+      - name: access_window_label
+        description: The waiting-times window as text, e.g. 'Jul–Dec 2025'.
+
+  - name: rpt_region_spend_access_experience
+    description: >
+      Cost, access and experience per region for the survey year: primary care cost per inhabitant
+      (Kolada N71007, nominal), access in that year's waiting-times months (July-December 2025 for the
+      2025 survey) and NPE scores. Grain: one row per region, Sweden included. With about 20 regions it
+      shows association, not cause.
+    columns:
+      - name: region_id
+        description: Kolada region code; '0000' is Sweden.
+        data_tests:
+          - unique
+          - not_null
+      - name: region_short_name
+        description: Short region name.
+      - name: is_national
+        description: True for Sweden.
+      - name: cost_per_inhabitant
+        description: Net primary care cost per inhabitant in the survey year, SEK, nominal.
+      - name: months_with_assessment_data
+        description: Months of the survey year with published assessment counts.
+      - name: total_assessments
+        description: Patients assessed in those months.
+      - name: within_3_days_share
+        description: Share assessed within 3 days.
+      - name: same_day_share
+        description: Share assessed the same day.
+      - name: contacts_answered_share
+        description: Share of calls and chats answered (NULL for Stockholm).
+      - name: overall_experience_score
+        description: NPE overall experience, 0-100 (NULL for Sörmland).
+      - name: accessibility_score
+        description: NPE accessibility dimension, 0-100.
+      - name: survey_year
+        description: NPE survey year, also the cost year.
+      - name: cost_vs_national
+        description: Cost relative to Sweden (0.05 = 5 % above).
+      - name: within_3_days_vs_national
+        description: within_3_days_share minus Sweden's, in share points.
+      - name: overall_experience_vs_national
+        description: overall_experience_score minus Sweden's, in points.
+      - name: accessibility_vs_national
+        description: accessibility_score minus Sweden's, in points.
+      - name: is_included
+        description: True for regions with cost, access and experience data for the year.
+        data_tests:
+          - not_null

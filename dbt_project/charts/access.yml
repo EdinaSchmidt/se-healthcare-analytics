@@ -1,0 +1,488 @@
+title: "Access to primary care"
+notes: >
+  Care guarantee follow-up from Socialstyrelsen's waiting-times exports (from July 2025): patients
+  assessed the same day and within 3 days, and calls and chats answered, by region and month, and how
+  much health centres differ within and between regions.
+# source, theme, width, title casing and the Sweden colour pin come from the shared base
+extends: [../chart_styles/base.yml]
+
+variables:
+  regions:
+    input: multiselect
+    label: "Region (trend)"
+    notes: Regions drawn on top of the Sweden benchmark in chart 1 only. Empty selection shows Sweden only.
+    options: { query: region_options, column: region_short_name }
+    default: [Stockholm, Västra Götaland, Skåne]
+
+queries:
+  region_options:
+    notes: Region names for the Region (trend) filter (national row excluded).
+    sql: |
+      SELECT DISTINCT region_short_name
+      FROM `se-healthcare-analytics.reporting.rpt_access_by_region_month`
+      WHERE NOT is_national
+      ORDER BY region_short_name
+
+  kpi_summary:
+    notes: >
+      One row for the KPI cards: Sweden's latest month, the change against the same month a year
+      earlier, and the between-region share of the variation between health centres.
+    sql: |
+      WITH latest AS (
+        SELECT
+          period_label,
+          FORMAT_DATE('%b %Y', DATE_SUB(period_start, INTERVAL 1 YEAR)) AS previous_year_label,
+          within_3_days_share,
+          within_3_days_change_vs_previous_year,
+          contacts_answered_share,
+          same_day_share
+        FROM `se-healthcare-analytics.reporting.rpt_access_by_region_month`
+        WHERE is_national
+          AND is_latest_month
+      ),
+      split AS (
+        SELECT
+          ANY_VALUE(between_region_variance_share) AS between_region_variance_share,
+          ANY_VALUE(window_label) AS window_label,
+          SUM(IF(is_national, centres_included, 0)) AS centres_included
+        FROM `se-healthcare-analytics.reporting.rpt_access_variation_by_region`
+      )
+      SELECT
+        latest.within_3_days_share,
+        latest.period_label,
+        -- whole share points for the "+2.2 pts" format
+        latest.within_3_days_change_vs_previous_year * 100 AS within_3_days_change_points,
+        CONCAT(latest.period_label, ' vs ', latest.previous_year_label) AS change_label,
+        latest.contacts_answered_share,
+        latest.same_day_share,
+        split.between_region_variance_share,
+        FORMAT("%s, %'d health centres", split.window_label, split.centres_included) AS split_label
+      FROM latest
+      CROSS JOIN split
+
+  access_trend:
+    notes: Share assessed within 3 days per month for Sweden (benchmark) plus the selected regions.
+    sql: |
+      SELECT period_start, region_short_name, within_3_days_share
+      FROM `se-healthcare-analytics.reporting.rpt_access_by_region_month`
+      WHERE (is_national{% if regions %} OR {{ filter('region_short_name', regions) }}{% endif %})
+        AND has_assessment_data
+      ORDER BY is_national DESC, region_short_name, period_start
+
+  access_heat:
+    notes: >
+      Region × month share assessed within 3 days. Sweden first, then regions by their share over the
+      latest 12 months; row_weight bolds the Sweden row. Months without data stay empty.
+    sql: |
+      WITH ranked AS (
+        SELECT
+          region_id,
+          SAFE_DIVIDE(
+            SUM(IF(period_start > DATE_SUB(max_month, INTERVAL 12 MONTH), assessed_within_3_days, NULL)),
+            SUM(IF(period_start > DATE_SUB(max_month, INTERVAL 12 MONTH), total_assessments, NULL))) AS share_12m
+        FROM `se-healthcare-analytics.reporting.rpt_access_by_region_month`
+        CROSS JOIN (SELECT MAX(period_start) AS max_month FROM `se-healthcare-analytics.reporting.rpt_access_by_region_month`)
+        GROUP BY 1
+      )
+      SELECT
+        mon.region_short_name,
+        FORMAT_DATE('%b %y', mon.period_start) AS month,
+        IF(mon.is_national, '700', '400') AS row_weight,
+        mon.within_3_days_share
+      FROM `se-healthcare-analytics.reporting.rpt_access_by_region_month` AS mon
+      INNER JOIN ranked USING (region_id)
+      ORDER BY mon.is_national DESC, ranked.share_12m DESC, mon.region_short_name, mon.period_start
+
+  region_ranking_12m:
+    notes: >
+      Latest 12 months per region (the export's region totals): share assessed within 3 days and share
+      of calls and chats answered, with Sweden's on every row for the reference line, the better/worse
+      colour group and label text. Regions sorted by the 3-day share (row_order 3..), after two blank
+      rows that carry the Sweden label. Charts 3 and 4 both read this query so their rows line up.
+    sql: |
+      WITH bounds AS (
+        SELECT DATE_SUB(MAX(period_start), INTERVAL 11 MONTH) AS window_start
+        FROM `se-healthcare-analytics.reporting.rpt_access_by_region_month`
+      ),
+      totals AS (
+        SELECT
+          region_short_name,
+          is_national,
+          COUNTIF(has_assessment_data) AS months_with_data,
+          SAFE_DIVIDE(SUM(assessed_within_3_days), SUM(total_assessments)) AS within_3_days_share,
+          SAFE_DIVIDE(SUM(answered_contacts), SUM(total_contacts)) AS contacts_answered_share
+        FROM `se-healthcare-analytics.reporting.rpt_access_by_region_month`
+        CROSS JOIN bounds
+        WHERE period_start >= bounds.window_start
+        GROUP BY 1, 2
+      ),
+      national AS (
+        SELECT within_3_days_share AS national_within, contacts_answered_share AS national_contacts
+        FROM totals WHERE is_national
+      ),
+      regions AS (
+        SELECT
+          totals.*,
+          national.*,
+          CAST(ROUND((within_3_days_share - national_within) * 100) AS INT64) AS within_points,
+          CAST(ROUND((contacts_answered_share - national_contacts) * 100) AS INT64) AS contacts_points
+        FROM totals CROSS JOIN national
+        WHERE NOT is_national
+      ),
+      labelled AS (
+        SELECT
+          *,
+          -- text, not a number format: U+2212 matches d3's minus; a short year gets its month count
+          CONCAT(IF(within_points = 0, '±0', REPLACE(FORMAT('%+d', within_points), '-', '−')), ' pts',
+            IF(months_with_data < 12, FORMAT(' (%d of 12 months)', months_with_data), '')) AS within_label,
+          IF(contacts_answered_share IS NULL, 'no data',
+            CONCAT(IF(contacts_points = 0, '±0', REPLACE(FORMAT('%+d', contacts_points), '-', '−')), ' pts')) AS contacts_label
+        FROM regions
+      )
+      SELECT
+        region_short_name,
+        2 + ROW_NUMBER() OVER (ORDER BY within_3_days_share DESC, region_short_name) AS row_order,
+        within_3_days_share,
+        national_within,
+        IF(within_3_days_share >= national_within, 'Better than Sweden', 'Worse than Sweden') AS within_direction,
+        -- the label sits outside whichever ends further right, the bar or the dashed Sweden line
+        IF(within_3_days_share >= national_within, within_label, '') AS within_bar_label,
+        IF(within_3_days_share >= national_within, '', within_label) AS within_line_label,
+        contacts_answered_share,
+        national_contacts,
+        IF(COALESCE(contacts_answered_share >= national_contacts, TRUE), 'Better than Sweden', 'Worse than Sweden') AS contacts_direction,
+        IF(contacts_answered_share >= national_contacts, contacts_label, '') AS contacts_bar_label,
+        IF(contacts_answered_share >= national_contacts, '', contacts_label) AS contacts_line_label
+      FROM labelled
+      UNION ALL
+      -- blank band names (one and two spaces) keep the axis empty; NULL shares draw no bar
+      SELECT ' ', 1, NULL, ANY_VALUE(national_within), 'Better than Sweden', '',
+        FORMAT('Sweden %d %%', CAST(ROUND(ANY_VALUE(national_within) * 100) AS INT64)),
+        NULL, ANY_VALUE(national_contacts), 'Better than Sweden', '',
+        FORMAT('Sweden %d %%', CAST(ROUND(ANY_VALUE(national_contacts) * 100) AS INT64))
+      FROM regions
+      UNION ALL
+      SELECT '  ', 2, NULL, ANY_VALUE(national_within), 'Better than Sweden', '', '',
+        NULL, ANY_VALUE(national_contacts), 'Better than Sweden', '', ''
+      FROM regions
+      ORDER BY row_order
+
+  centre_spread:
+    notes: >
+      Long format for the dot plot: one row per included health centre (latest 12 months, at least
+      250 assessments) and one per region carrying the region's pooled share, told apart by `kind`
+      (colour). Regions ordered by that pooled share; region rows come last so their
+      markers draw on top.
+    sql: |
+      WITH centres AS (
+        SELECT
+          region_short_name,
+          DENSE_RANK() OVER (ORDER BY region_within_3_days_share DESC, region_short_name) AS row_order,
+          care_unit_name,
+          within_3_days_share,
+          region_within_3_days_share
+        FROM `se-healthcare-analytics.reporting.rpt_access_by_health_centre`
+        WHERE is_included
+      )
+      SELECT region_short_name, row_order, 'Health centre' AS kind, care_unit_name AS unit, within_3_days_share
+      FROM centres
+      UNION ALL
+      SELECT DISTINCT region_short_name, row_order, 'Region share', CONCAT(region_short_name, ' (all centres)'), region_within_3_days_share
+      FROM centres
+      ORDER BY kind, row_order, within_3_days_share
+
+charts:
+  kpi_within_3_days:
+    type: kpi
+    query: kpi_summary
+    label: "Sweden, assessed within 3 days"
+    value: within_3_days_share
+    notes: Share of patients assessed within 3 days in the latest month, all of Sweden.
+    style:
+      value:
+        format: percent
+    support:
+      value: period_label
+      label: "latest month"
+
+  kpi_change:
+    type: kpi
+    query: kpi_summary
+    label: "Change vs same month last year"
+    value: within_3_days_change_points
+    notes: Change in Sweden's share assessed within 3 days against the same month a year earlier, in share points.
+    style:
+      value:
+        format: percentage_points_delta
+    support:
+      value: change_label
+
+  kpi_contacts:
+    type: kpi
+    query: kpi_summary
+    label: "Sweden, calls and chats answered"
+    value: contacts_answered_share
+    notes: Share of calls and chats to health centres that were answered in the latest month.
+    style:
+      value:
+        format: percent
+    support:
+      value: period_label
+      label: "latest month, excl. Stockholm"
+
+  kpi_between_regions:
+    type: kpi
+    query: kpi_summary
+    label: "Differences between centres that lie between regions"
+    value: between_region_variance_share
+    notes: >
+      Between-region part of the volume-weighted variance of health centres' share assessed within 3
+      days (rpt_access_variation_by_region). The rest lies between centres of the same region.
+    style:
+      value:
+        format: percent_whole
+    support:
+      value: split_label
+
+  access_trend:
+    type: line
+    query: access_trend
+    title: "1. Assessed within 3 days, by month"
+    subtitle: "Share of patients assessed within 3 days of contact. Sweden as benchmark, selected regions on top"
+    notes: Monthly share assessed within 3 days; Sweden pinned to a neutral ink so it reads as the benchmark.
+    x: period_start
+    y: within_3_days_share
+    color: region_short_name
+    x_label: "Month"
+    y_label: "Assessed within 3 days"
+    height: 300
+    # legend.values lists all regions so Sweden can lead; unselected ones are absent by design
+    warnings_ignore: [WARN-LEGEND-VALUES-UNRESOLVED]
+    style:
+      number_format: percent_whole
+      time_format: "%b %Y"
+      endpoint_labels:
+        visible: false
+      legend:
+        visible: true
+        position: top
+        direction: horizontal
+        title: { visible: false }
+        # Sweden first; `values` is an order *and* a filter in 0.9.1, so every region is listed
+        values:
+          - Sweden
+          - Blekinge
+          - Dalarna
+          - Gotland
+          - Gävleborg
+          - Halland
+          - Jämtland Härjedalen
+          - Jönköping
+          - Kalmar
+          - Kronoberg
+          - Norrbotten
+          - Skåne
+          - Stockholm
+          - Sörmland
+          - Uppsala
+          - Värmland
+          - Västerbotten
+          - Västernorrland
+          - Västmanland
+          - Västra Götaland
+          - Örebro
+          - Östergötland
+      axis_y:
+        position: left
+
+  access_heat:
+    type: table
+    query: access_heat
+    title: "2. Assessed within 3 days, region by month"
+    subtitle: "Orange = below about 80 %, teal = above. Sweden on top, regions by their latest 12 months. Empty = no data reported"
+    notes: >
+      Region × month share assessed within 3 days as a heat table, diverging around 80 % (roughly
+      Sweden's level) on a fixed 40-100 % scale, so seasons and regions compare on one scale.
+    rows: [region_short_name, row_weight]   # row_weight is a style input, hidden automatically
+    columns: [month]
+    values: [within_3_days_share]
+    conditional_formatting:
+      region_short_name:
+        when:
+          - eq: Sweden
+            background: dbt-grays.heading
+    style:
+      symbol_mode: all
+      wrap: false
+      row: { height: 20 }
+      columns:
+        region_short_name: { label: "Region", width: 150, font: { weight: row_weight } }
+        within_3_days_share:
+          format: { spec: ".0%" }
+          align: center
+          font: { weight: row_weight }
+          # Diverging around 80 % on fixed 40-100 % bounds; each arm runs to its own end. Stops are
+          # luminance-matched like the cost board's growth table (orange .3/.4 ≈ teal .8/.7)
+          scale:
+            background:
+              palette: [dbt-div-orange-teal-dark.3, dbt-div-orange-teal-dark.4, dbt-div-orange-teal-dark.6, dbt-div-orange-teal-dark.7, dbt-div-orange-teal-dark.8]
+              min: 0.4
+              max: 1.0
+              hinge: 0.8
+              arm_mode: symmetric
+
+  within_3_days_by_region:
+    type: bar
+    query: region_ranking_12m
+    title: "3. Assessed within 3 days, latest 12 months"
+    subtitle: "Region totals. Colour and label show the difference from Sweden (dashed line), in share points"
+    notes: >
+      Ranks regions by the share assessed within 3 days over the latest 12 months against Sweden
+      (dashed line); colour and the label carry the difference. Regions with fewer than 12 reported
+      months say so in the label.
+    x: region_short_name
+    y: within_3_days_share
+    color: within_direction
+    x_label: "Region"
+    height: 400
+    sort: { by: row_order, order: asc }
+    warnings_ignore: [WARN-LAYERED-CHART-SHARED-Y-AXIS-SCALE-MISMATCH]
+    style:
+      orientation: horizontal
+      overlap: full
+      number_format: percent_whole
+      # better / worse than Sweden. Set here, not in category_colors: a chart with layers ignores those pins
+      color:
+        categorical:
+          palette: [dbt-seq-teal.5, dbt-seq-amber.5]
+      marks:
+        bar:
+          max_size: 12
+          labels:
+            visible: true
+            field: within_bar_label
+            position: above
+      axis_x: &compact_band_labels
+        labels: { min_gap: 3 }
+      axis_y:
+        title: { visible: false }
+      legend:
+        visible: false
+    layers:
+      - type: line
+        y: national_within
+        label: "Sweden"
+        style:
+          marks:
+            line:
+              stroke: { color: dbt-grays.canvas, width: 2, dasharray: "4 3" }
+              labels:
+                visible: true
+                field: within_line_label
+                position: right
+            point: { size: 0 }
+
+  contacts_by_region:
+    type: bar
+    query: region_ranking_12m
+    title: "4. Calls and chats answered, latest 12 months"
+    subtitle: "Same region order as chart 3. Difference from Sweden (dashed line) in share points"
+    notes: >
+      Share of calls and chats answered over the latest 12 months per region against Sweden, in chart
+      3's order so a region reads across both. Stockholm is not in the first-contact export.
+    x: region_short_name
+    y: contacts_answered_share
+    color: contacts_direction
+    x_label: "Region"
+    height: 400
+    sort: { by: row_order, order: asc }
+    warnings_ignore: [WARN-LAYERED-CHART-SHARED-Y-AXIS-SCALE-MISMATCH]
+    style:
+      orientation: horizontal
+      overlap: full
+      number_format: percent_whole
+      color:
+        categorical:
+          palette: [dbt-seq-teal.5, dbt-seq-amber.5]
+      marks:
+        bar:
+          max_size: 12
+          labels:
+            visible: true
+            field: contacts_bar_label
+            position: above
+      axis_x: *compact_band_labels
+      axis_y:
+        title: { visible: false }
+      legend:
+        visible: false
+    layers:
+      - type: line
+        y: national_contacts
+        label: "Sweden"
+        style:
+          marks:
+            line:
+              stroke: { color: dbt-grays.canvas, width: 2, dasharray: "4 3" }
+              labels:
+                visible: true
+                field: contacts_line_label
+                position: right
+            point: { size: 0 }
+
+  centre_spread:
+    type: scatter
+    query: centre_spread
+    title: "5. Health centres within each region"
+    subtitle: "Each teal dot is a health centre (latest 12 months, at least 250 assessments); the white dot is the region's share. Regions by that share"
+    notes: >
+      Dot plot of every included health centre's share assessed within 3 days, grouped by region,
+      with the region's pooled share as a white dot drawn on top. The gap between regions is much
+      wider than the spread inside most of them (question 2).
+    x: within_3_days_share
+    y: region_short_name
+    color: kind
+    x_label: "Assessed within 3 days"
+    y_label: "Region"
+    height: 520
+    sort: { by: row_order, order: asc }
+    style:
+      color:
+        categorical:
+          palette: [dbt-seq-teal.5, dbt-grays.canvas]
+      marks:
+        point:
+          size: 40
+          opacity: 0.6
+      axis_x:
+        labels: { format: ".0%" }
+        # no automatic 100 % reference rule: it read as a stray axis line at the edge
+        grid: { threshold: { visible: false } }
+      axis_y:
+        position: left
+      legend:
+        visible: false
+
+rows:
+  - notes: Metric definitions shown under the board title.
+    text: |
+      **Assessed within 3 days** is the share of patients who got a medical assessment by a licensed professional within 3 days of contacting their health centre, the care guarantee's second step. **Calls and chats answered** is the share of contacts the centre answered. Shares are pooled: counts are summed before dividing.
+  - height: 120
+    cols: [kpi_within_3_days, kpi_change, kpi_contacts, kpi_between_regions]
+  - access_trend
+  - access_heat
+  - cols:
+      - within_3_days_by_region
+      - contacts_by_region
+  - centre_spread
+  - notes: Methodology note on the waiting-times data and how to read the comparisons.
+    rows:
+      - text: "## About the data"
+      - cols:
+          - text: |
+              **What is measured.** Socialstyrelsen's monthly waiting-times exports per region and health centre, from July 2025. A patient counts as assessed within 3 days when a doctor, nurse or other licensed professional assessed them within 3 days of contact; patients who chose to wait longer stay in the denominator. Access is seasonal (lowest in autumn and winter), so compare the same month across years.
+          - text: |
+              **What is compared.** Charts 1–4 use the export's region totals, which include every reporting unit. Chart 5 and the variation card use health centres only: out-of-hours clinics, youth clinics, psychiatry and rehab are left out, and so are centres with fewer than 250 assessments in 12 months. Each centre is weighted by its number of patients.
+          - text: |
+              **How to read it.** If most of the variation lies between regions, the region's way of organising and recording care matters more than individual centres. Regions record assessments in their own systems, so part of a gap can be recording practice. Blekinge reported 4 of the 14 months (2 of the latest 12), Gävleborg misses two months and Halland one month of contacts, and Stockholm has no first-contact data.
+      - text: "Source: Socialstyrelsen, Väntetider i vården (primary care), July 2025 – August 2026."

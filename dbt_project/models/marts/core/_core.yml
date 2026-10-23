@@ -46,4 +46,253 @@ models:
               config:
                 severity: warn
 
+  - name: dim_npe_survey
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - period_start
+              - measurement_sv
+              - selection_sv
+    columns:
+      - name: measurement
+        description: English label from npe_survey_translations. NULL means a new measurement or selection; add it to the seed.
+        data_tests:
+          - not_null
+      - name: selection
+        data_tests:
+          - not_null
+
+  - name: dim_npe_question
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - period_start
+              - measurement_sv
+              - selection_sv
+              - question_number
+    columns:
+      - name: question_text
+        description: >
+          English text from npe_question_translations, matched on the exact Swedish text.
+          NULL means a new or reworded question; add it to the seed.
+        data_tests:
+          - not_null
+      - name: dimension_name
+        description: English name from npe_dimension_translations. NULL means a new dimension; add it to the seed.
+        data_tests:
+          - not_null
+
+  - name: dim_npe_answer_option
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - period_start
+              - measurement_sv
+              - selection_sv
+              - question_number
+              - answer_option
+    columns:
+      - name: answer_text
+        description: >
+          English text from npe_answer_translations, matched on the exact Swedish text.
+          NULL means a new answer text; add it to the seed.
+        data_tests:
+          - not_null
+
+  - name: dim_care_unit
+    description: >
+      One row per care unit: every NPE health centre and every unit in the waiting-times exports,
+      merged where int_care_unit_matches links them.
+    columns:
+      - name: care_unit_id
+        description: The HSA-ID when NPE knows the unit, otherwise a hash of region and waiting-times name.
+        data_tests:
+          - unique
+          - not_null
+      - name: region_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_region')
+                field: region_id
+      - name: unit_type
+        description: >
+          'health_centre' (NPE-surveyed, or named and run as a listed-patient health centre),
+          'out_of_hours' (jour, närakut, evening and weekend clinics, 1177) or 'other' (youth clinics,
+          psychiatry, rehab, children's and family health and similar). Only health centres take part
+          in centre-level comparisons.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [health_centre, out_of_hours, other]
+      - name: hsa_id
+        data_tests:
+          - unique
+      - name: is_matched
+        description: True when the unit is in both NPE and the waiting-times exports.
+        data_tests:
+          - not_null
+
+  - name: fct_medical_assessment
+    description: >
+      Waiting time to medical assessment per month: the export's region totals (care_unit_id NULL)
+      and every care unit. The levels overlap; never sum across them.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - period_start
+              - region_id
+              - care_unit_id
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "assessed_same_day <= assessed_within_3_days AND assessed_within_3_days <= total_assessments"
+          config:
+            where: "total_assessments IS NOT NULL"
+    columns:
+      - name: aggregation_level
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [region, health_centre]
+      - name: region_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_region')
+                field: region_id
+      - name: care_unit_id
+        data_tests:
+          - not_null:
+              config:
+                where: "aggregation_level = 'health_centre'"
+          - relationships:
+              arguments:
+                to: ref('dim_care_unit')
+                field: care_unit_id
+
+  - name: fct_first_contact
+    description: >
+      Answered calls and chats per month and contact type: the export's region totals
+      (care_unit_id NULL) and every care unit. The levels overlap; never sum across them.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - period_start
+              - region_id
+              - care_unit_id
+              - contact_type
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "answered_contacts <= total_contacts"
+          config:
+            where: "total_contacts IS NOT NULL"
+    columns:
+      - name: contact_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [all, phone, chat]
+      - name: region_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_region')
+                field: region_id
+      - name: care_unit_id
+        data_tests:
+          - not_null:
+              config:
+                where: "aggregation_level = 'health_centre'"
+          - relationships:
+              arguments:
+                to: ref('dim_care_unit')
+                field: care_unit_id
+
+  - name: fct_npe_unit_results
+    description: >
+      NPE response rate and overall experience per survey and unit (region, municipality or health
+      centre, each level with a national row). Never sum across levels.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - period_start
+              - measurement_sv
+              - selection_sv
+              - aggregation_level
+              - region_id
+              - municipality_name
+              - care_unit_id
+    columns:
+      - name: region_id
+        data_tests:
+          - not_null
+      - name: care_unit_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_care_unit')
+                field: care_unit_id
+      - name: overall_experience_score
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+
+  - name: fct_npe_dimension_scores
+    description: NPE dimension scores (0-100) per survey, unit and dimension, with the confidence interval.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - period_start
+              - measurement_sv
+              - selection_sv
+              - aggregation_level
+              - region_id
+              - municipality_name
+              - care_unit_id
+              - dimension_code
+    columns:
+      - name: score
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+
+  - name: fct_npe_question_scores
+    description: NPE question scores (0-100) per survey, unit and scored question, with the confidence interval.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - period_start
+              - measurement_sv
+              - selection_sv
+              - aggregation_level
+              - region_id
+              - municipality_name
+              - care_unit_id
+              - question_number
+    columns:
+      - name: score
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+
 

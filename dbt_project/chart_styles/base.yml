@@ -1,0 +1,22 @@
+# Shared settings for every board in charts/. A board picks them up with
+# `extends: [../chart_styles/base.yml]`; its own keys are merged on top (style included, key by key).
+# Not a board on its own (it has no layout), so it lives outside charts/: dct serve lists every
+# file in charts/ as a board, even an underscore-prefixed one, and shows an error page for it.
+source: reporting
+theme: neon
+width: 1440
+style:
+  # keep authored casing: the theme's title case turns "SEK/inh" into "Sek/Inh"
+  title:
+    font: { case: none }
+  charts:
+    kpi:
+      label:
+        font: { case: none }
+    category_colors:
+      # Sweden is the benchmark on every board: neutral near-white (neon's value ink), never a series hue.
+      # The reporting marts call the national row 'Sweden' in region_short_name.
+      # dbt-grays stops are absolute colors; revisit this pin if the boards leave a dark theme.
+      region_short_name:
+        values:
+          Sweden: dbt-grays.canvas

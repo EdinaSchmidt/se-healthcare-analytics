@@ -1,0 +1,34 @@
+answer_text_sv,answer_text
+Mycket bra,Very good
+Ganska bra,Fairly good
+Ganska dålig,Fairly poor
+Ganska dåligt,Fairly poor
+Mycket dålig,Very poor
+Mycket dåligt,Very poor
+Mycket stort,Very high
+Ganska stort,Fairly high
+Litet,Low
+Inget alls,None at all
+Helt och hållet,Completely
+Till stor del,To a large extent
+Till viss del,To some extent
+Inte alls,Not at all
+Kort (rimlig),Short (reasonable)
+Något för lång,Somewhat too long
+Alldeles för lång,Far too long
+Inte aktuellt / Vet inte,Not applicable / Don't know
+Ja,Yes
+Nej,No
+"Ja, matvanor","Yes, eating habits"
+"Ja, fysisk aktivitet","Yes, physical activity"
+"Ja, alkoholvanor","Yes, alcohol habits"
+"Ja, tobaks- eller nikotinvanor","Yes, tobacco or nicotine habits"
+"Ja, annan levnadsvana","Yes, another lifestyle habit"
+Ålder,Age
+Kön,Sex
+Könsöverskridande identitet eller uttryck,Transgender identity or expression
+Etnisk tillhörighet,Ethnicity
+Religion eller annan trosuppfattning,Religion or other belief
+Funktionsnedsättning,Disability
+Sexuell läggning,Sexual orientation
+Annat,Other
