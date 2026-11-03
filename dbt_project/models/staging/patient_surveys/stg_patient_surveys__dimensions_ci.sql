@@ -1,0 +1,1 @@
+{{ stg_npe_dimensions('dimensions_ci', 'score_ci') }}

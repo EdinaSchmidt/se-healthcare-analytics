@@ -1,0 +1,152 @@
+sources:
+  - name: patient_surveys
+    database: se-healthcare-analytics
+    schema: raw_patient_surveys
+    description: >
+      National patient survey (NPE) in primary care, doctor visits, published by SKR yearly.
+      Manual xlsx download, one table per sheet; Dagster combines all survey years into one
+      raw table per sheet (full refresh), with the year in `survey_period`.
+      Results at three aggregation levels (region, municipality, health centre) in `aggregation_level`.
+      A new time series starts in 2025; earlier years aren't comparable and aren't loaded.
+      Region Sörmland has no results in 2025.
+    config:
+      loaded_at_field: _snapshot_date
+      freshness:
+        warn_after: {count: 400, period: day}
+
+    tables:
+      - name: dimensions
+        identifier: dimensioner
+        description: >
+          Score per survey dimension, one column per dimension: care and treatment (vard_och_behandling),
+          involvement (delaktighet), respectful treatment (bemotande), continuity (kontinuitet),
+          information, accessibility (tillganglighet). Scores are NULL when suppressed;
+          `kommentar` gives the reason (e.g. "För få svar", too few responses).
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "dimensioner"]
+        data_tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments: 
+              combination_of_columns: [region, kommun, hsa_id, survey_period, aggregation_level]
+        columns:
+          - name: kommentar
+            description: Reason a score is suppressed (NULL when the score is published).
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values:
+                      - För få svar
+          - name: aggregation_level
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values:
+                      - Hälso-/vårdcentral
+                      - Kommun
+                      - Region
+          - name: selection
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values:
+                      - Läkarbesök         
+
+      - name: dimensions_ci
+        identifier: dimensioner_ki
+        description: >
+          Half-width of SKR's published confidence interval (± margin, in score points) for each
+          dimension score in `dimensions`, same units and columns. Interval = score ± margin.
+          The confidence level isn't stated in the file or on the results page.
+          NULL when suppressed, with the reason in `kommentar`.
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "dimensioner_ki"]
+        data_tests:
+        - dbt_utils.unique_combination_of_columns:
+            arguments: 
+              combination_of_columns: [region, kommun, hsa_id, survey_period, aggregation_level]
+        columns:
+          - name: kommentar
+            description: Reason a score is suppressed (NULL when the score is published).
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values:
+                      - För få svar
+          - name: aggregation_level
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values:
+                      - Hälso-/vårdcentral
+                      - Kommun
+                      - Region
+          - name: selection
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values:
+                      - Läkarbesök  
+
+      - name: question_answers
+        identifier: fragesvar
+        description: >
+          Answers per survey question and answer option. Wide layout: one column per question
+          (88 columns, named after the question number, e.g. `1.1`).
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "fragesvar"]
+
+      - name: questions
+        identifier: fragor
+        description: >
+          The survey's questions and answer options (91 rows), in Swedish as published by SKR.
+          Fill-down layout: the question text appears only on its first row, so row order
+          (`_row_number`) is needed to assign answer options to questions.
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "fragor"]
+
+      - name: overall_experience
+        identifier: helhetsupplevelse
+        description: >
+          Overall experience score, SKR's summary measure of how patients rate the visit as a whole.
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "helhetsupplevelse"]
+
+      - name: mean_scores
+        identifier: medelvarde
+        description: Mean score per survey question.
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "medelvarde"]
+
+      - name: mean_scores_ci
+        identifier: medelvarde_ki
+        description: >
+          Half-width of SKR's published confidence interval (± margin, in score points) for each
+          mean score in `mean_scores`, same units and columns. Interval = mean ± margin.
+          The confidence level isn't stated in the file or on the results page.
+          NULL when suppressed, with the reason in `kommentar`.
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "medelvarde_ki"]
+
+      - name: response_rates
+        identifier: svarsfrekvens
+        description: >
+          Surveys sent out (utskickade_enkater), number of respondents (antal_respondenter)
+          and response rate in % (svarsfrekvens). NULL when suppressed, with the reason in `kommentar`.
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_patient_surveys", "svarsfrekvens"]

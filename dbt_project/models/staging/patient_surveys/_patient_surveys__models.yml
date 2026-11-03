@@ -1,0 +1,79 @@
+models:
+  - name: stg_patient_surveys__dimensions
+    description: >
+      NPE dimension scores, one row per survey year, unit and dimension. A unit is a region,
+      municipality or health centre, indicated by `aggregation_level`; grain is
+      aggregation_level × region × municipality × health centre × year × dimension.
+      Unpivoted from one column per dimension in the source (six dimensions per unit).
+      Suppressed scores are kept as NULL, with the reason in `comment_sv` / `comment`.
+      The `0000` region rows are Sweden as a whole. 
+      Built by the stg_npe_dimensions macro, shared with stg_patient_surveys__dimensions_ci.
+    columns:
+      - name: dimension_result_key
+        description: >
+          Surrogate key of the grain (aggregation level, region, municipality, health centre,
+          year, dimension). Identical in `stg_patient_surveys__dimensions_ci`, used to join
+          score and margin.
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments: 
+                to: ref('stg_patient_surveys__dimensions_ci')
+                field: dimension_result_key
+      - name: region_id
+        description: Kolada region code, decoded from the NPE region name via the `regions` seed.
+        data_tests:
+          - not_null
+      - name: year
+        data_tests:
+          - not_null
+      - name: aggregation_level
+        description: Level of the unit (region, municipality, health_center), translated from `aggregation_level_sv`.
+        data_tests:
+          - not_null
+      - name: dimension
+        description: Dimension code from the `npe_dimension_translations` seed, e.g. accessibility, continuity.
+        data_tests:
+          - not_null
+      - name: dimension_sv
+        description: Dimension name as published by SKR, e.g. Tillgänglighet.
+      - name: score
+        description: Dimension score (0–100). NULL when suppressed.
+      - name: comment
+        description: English translation of `comment_sv`, the reason a score is suppressed.
+      - name: min_respondents_public
+        description: Minimum number of respondents for a result to be published, parsed from `respondent_threshold_sv`.
+
+  - name: stg_patient_surveys__dimensions_ci
+    description: >
+      Half-width of SKR's published confidence interval (± margin) for each NPE dimension score,
+      one row per survey year, unit and dimension; same grain and key as
+      `stg_patient_surveys__dimensions`. Interval = score ± ci_margin.
+      The confidence level isn't stated by SKR. Suppressed margins are kept as NULL,
+      with the reason in `comment_sv` / `comment`.
+      Built by the stg_npe_dimensions macro, shared with stg_patient_surveys__dimensions.
+    columns:
+      - name: dimension_result_key
+        description: Surrogate key of the grain, identical to the key in `stg_patient_surveys__dimensions`.
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_patient_surveys__dimensions')
+                field: dimension_result_key
+      - name: region_id
+        data_tests:
+          - not_null
+      - name: year
+        data_tests:
+          - not_null
+      - name: aggregation_level
+        data_tests:
+          - not_null
+      - name: dimension
+        data_tests:
+          - not_null
+      - name: ci_margin
+        description: Half-width of the confidence interval, in score points. NULL when suppressed.

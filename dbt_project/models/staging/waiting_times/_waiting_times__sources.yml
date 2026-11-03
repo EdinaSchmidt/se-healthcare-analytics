@@ -1,0 +1,51 @@
+sources:
+  - name: waiting_times
+    database: se-healthcare-analytics
+    schema: raw_waiting_times
+    description: >
+      Waiting times in primary care from Socialstyrelsen, monthly per health centre from July 2025.
+      Manual CSV downloads, split into several part files because the portal caps each extract
+      at 70,000 cells; Dagster loads the newest complete snapshot (full refresh).
+      All columns are STRING as delivered: decimal comma, Swedish month names, and suppressed
+      values coded as "X" (suppressed), a double soft hyphen (no data) or "N" (no patients).
+      Aggregate rows are included: "Alla regioner" (Sweden) and "Alla vårdcentraler" (region total).
+      Regions that changed journal systems during the period may report incompletely.
+    config:
+      loaded_at_field: _loaded_at
+      freshness:
+        warn_after: {count: 35, period: day}
+
+    tables:
+      - name: first_contact
+        description: >
+          Answered and total calls/chats per health centre, month and contact type, including the
+          aggregate type "Alla samtal". Region Stockholm doesn't report it (no rows).
+          Västernorrland reports as one unit, without health centre rows.
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_waiting_times", "first_contact"]
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [region, ar, manad, vardcentral, typ]
+        columns:
+          - name: typ
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values: [Alla samtal, Chatt, Telefon]
+
+      - name: medical_assessment
+        description: >
+          Waiting time to medical assessment per health centre and month: counts within 0 and 3 days,
+          total, patients who chose to wait longer, and mean and percentile waiting times.
+          `antal_over_3_dagar` is always suppressed and is derived in staging as total minus within 3 days.
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_waiting_times", "medical_assessment"]
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [region, ar, manad, vardcentral]

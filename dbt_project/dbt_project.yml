@@ -12,6 +12,9 @@ clean-targets:
 seeds:
   se_healthcare_analytics:
     +schema: seeds
+tests:
+  +store_failures: true
+  +schema: _test_failures
 
 models:
   se_healthcare_analytics:

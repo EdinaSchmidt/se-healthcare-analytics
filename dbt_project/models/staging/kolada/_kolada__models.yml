@@ -1,0 +1,49 @@
+models:
+  - name: stg_kolada__kpi_values
+    description: >
+      Kolada KPI values, one row per KPI, region, year and gender. All genders are kept;
+      core filters to total. NULL amounts are kept with the reason in `value_status`.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [kpi_id, region_id, year, gender_code]
+    columns:
+      - name: kpi_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_kolada__kpis')
+                field: kpi_id
+      - name: region_id
+        description: Kolada region code (raw column `municipality`); `0000` = Sweden.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('regions')
+                field: region_id
+      - name: gender
+        description: total, female or male, translated from `gender_code`.
+        data_tests:
+          - not_null
+      - name: amount
+        description: KPI value in the KPI's unit (see `dim_kolada_kpi`). NULL when Kolada has no value; see `value_status`.
+      - name: value_status
+        description: Kolada's status for the value, lowercased; explains a NULL amount.
+      - name: is_deleted
+        description: True when Kolada has withdrawn the value.
+
+  - name: stg_kolada__kpis
+    description: Kolada KPI metadata, one row per KPI. Swedish text as delivered; English names are joined in `dim_kolada_kpi`.
+    columns:
+      - name: kpi_id
+        data_tests:
+          - unique
+          - not_null
+      - name: provider_type
+        description: >
+          Kolada's provider type (auspice): total, private, public, own_operation (run by the region itself,
+          a subset of public), other_than_own, not_applicable. Translated from `provider_type_code`.
+        data_tests:
+          - not_null

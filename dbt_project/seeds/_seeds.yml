@@ -18,6 +18,10 @@ seeds:
                   - sek_per_inhabitant
                   - percent
                   - per_1000_inhabitants
+                  - inhabitants
+                  - index
+                  - ratio
+                  - years
       - name: cost_role
         data_tests:
           - not_null
@@ -27,6 +31,41 @@ seeds:
                   - total
                   - component
                   - not_applicable
+
+  - name: kolada_population_projections
+    description: >
+      The Kolada KPIs that hold SCB's population projections: the age group and horizon each one projects, and
+      base_kpi_id, the KPI with the same age group's actual population that fct_population_projections compares
+      it with. fct_kpi_values leaves these KPIs out, because their period is the base year, not the year projected.
+    config:
+      column_types:
+        kpi_id: string
+        base_kpi_id: string
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - age_group
+              - horizon_years
+    columns:
+      - name: kpi_id
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('kolada_kpi_translations')
+                field: kpi_id
+      - name: horizon_years
+        data_tests:
+          - not_null
+      - name: base_kpi_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('kolada_kpi_translations')
+                field: kpi_id
 
 
   - name: regions
@@ -142,14 +181,6 @@ seeds:
         data_tests:
           - unique
           - not_null
-          - relationships:
-              arguments:
-                to: ref('int_npe__health_centres')
-                field: hsa_id
       - name: waiting_times_name
         data_tests:
           - not_null
-          - relationships:
-              arguments:
-                to: ref('int_waiting_times__unit_names')
-                field: waiting_times_name
