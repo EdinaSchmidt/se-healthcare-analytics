@@ -1,0 +1,68 @@
+models:
+  - name: stg_waiting_times__first_contact
+    description: >
+      Calls and chats answered at first contact, one row per region, health centre, month and contact type.
+      Aggregate rows are kept ("Alla vårdcentraler", type all_calls) and filtered in core.
+      Suppressed values are NULL with the reason in `suppression_code`.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [region_id, health_center, type, period_start]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "answered_calls <= total_calls"
+    columns:
+      - name: region_id
+        description: Kolada region code, decoded from the region name via the `regions` seed (`0000` = Sweden).
+        data_tests:
+          - not_null
+      - name: type
+        description: Contact type (all_calls, chat, telephone), translated from `type_sv`.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [all_calls, chat, telephone]
+      - name: period_start
+        description: First day of the month, built from `ar` and the month name via the `month_translations` seed.
+        data_tests:
+          - not_null
+      - name: suppression_code
+        description: Why the counts are NULL (suppressed, no_data); NULL when the counts are published.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [suppressed, no_data]
+
+  - name: stg_waiting_times__medical_assessment
+    description: >
+      Waiting time to medical assessment, one row per region, health centre and month.
+      Aggregate rows are kept ("Alla vårdcentraler") and filtered in core.
+      Suppressed values are NULL with the reason in `suppression_code`.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [region_id, health_center, period_start]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "assessed_within_0_days <= assessed_within_3_days AND assessed_within_3_days <= total_assessments"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "wait_days_p10 <= wait_days_p25 AND wait_days_p25 <= wait_days_median AND wait_days_median <= wait_days_p75 AND wait_days_p75 <= wait_days_p90"
+    columns:
+      - name: region_id
+        description: Kolada region code, decoded from the region name via the `regions` seed (`0000` = Sweden).
+        data_tests:
+          - not_null
+      - name: period_start
+        description: First day of the month, built from `ar` and the month name via the `month_translations` seed.
+        data_tests:
+          - not_null
+      - name: suppression_code
+        description: Why values are NULL (suppressed, no_data, no_patients); NULL when published.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [suppressed, no_data, no_patients]
+      - name: assessed_over_3_days
+        description: Derived as total_assessments minus assessed_within_3_days, because the source always suppresses it.

@@ -1,0 +1,61 @@
+sources:
+  - name: kolada
+    database: se-healthcare-analytics
+    schema: raw_kolada
+    description: >
+      Kolada API v3 (RKA), no authentication. Loaded by Dagster on a monthly schedule
+      (full refresh), years 2020 to current. Kolada calls every geographic unit a
+      "municipality", so regions arrive in the `municipality` column (`0000` = Sweden).
+    config:
+      loaded_at_field: _fetched_at
+      freshness:
+        warn_after: {count: 35, period: day}
+
+    tables:
+      - name: kpi_values
+        description: >
+          KPI values per KPI, region, year and gender (T total, K female, M male).
+          Missing values are NULL with the reason in `status`; `isdeleted` marks values Kolada has withdrawn.
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_kolada", "kpi_values"]
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [kpi, municipality, period, gender]
+        columns:
+          - name: gender
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values: [T, K, M]
+
+      - name: kpis
+        description: Metadata for the KPIs requested from the API (Swedish titles, descriptions, provider type).
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_kolada", "kpis"]
+        columns:
+          - name: id
+            data_tests:
+              - unique
+              - not_null
+          - name: auspice
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values: [T, P, E, X, O, A]
+
+      - name: regions
+        description: Kolada's list of regions, including `0000` (Riket, Sweden). Not modelled; regions come from the `regions` seed.
+        config:
+          meta:
+            dagster:
+              asset_key: ["raw_kolada", "regions"]
+        columns:
+          - name: id
+            data_tests:
+              - unique
+              - not_null
