@@ -38,6 +38,7 @@ SELECT
     ,total_calls_regional
     ,SAFE_DIVIDE(total_calls_national - total_calls_regional, total_calls_national) AS total_calls_diff
 FROM national FULL OUTER JOIN regional USING(period_start)
-WHERE 
-    SAFE_DIVIDE(answered_calls_national - answered_calls_regional, answered_calls_national) >= 0.00001 OR 
-    SAFE_DIVIDE(total_calls_national - total_calls_regional, total_calls_national) >= 0.00001
+WHERE ABS(SAFE_DIVIDE(answered_calls_national - answered_calls_regional, answered_calls_national)) >= 0.00001
+    OR ABS(SAFE_DIVIDE(total_calls_national - total_calls_regional, total_calls_national)) >= 0.00001
+    OR answered_calls_national IS NULL
+    OR answered_calls_regional IS NULL

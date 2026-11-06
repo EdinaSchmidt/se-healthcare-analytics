@@ -1,11 +1,213 @@
 models:
+  - name: dim_region
+    description: >
+      One row per region, plus Sweden (`0000`). Built from the `regions` seed, which maps
+      each source's region spelling to the Kolada region code.
+    columns:
+      - name: region_id
+        description: Kolada region code. `0000` = Sweden.
+        data_tests: [unique, not_null]
+      - name: is_national
+        description: True for the Sweden row (`0000`).
+        data_tests: [not_null]
+      - name: region_short_name
+        description: Short region name without "Region" (e.g. "Skåne").
+        data_tests: [not_null]
+      - name: region_display_name
+        description: Name for the dashboard; "Sweden (national)" for `0000`.
+        data_tests: [not_null]
+
+  - name: dim_kolada_kpi
+    description: >
+      One row per Kolada KPI used in the project. Kolada's own metadata, plus unofficial
+      English names and project attributes (unit, cost role) from the
+      `kolada_kpi_translations` seed, and projection horizons from the
+      `kolada_population_projections` seed.
+    columns:
+      - name: kpi_id
+        description: Kolada KPI code (e.g. `N71029`).
+        data_tests: [unique, not_null]
+      - name: kpi_name
+        description: Unofficial English name. NULL means the KPI is missing from the translations seed.
+        data_tests: [not_null]
+      - name: is_projection
+        description: True if the KPI is a population projection (value refers to a future year).
+        data_tests: [not_null]
+      - name: horizon_years
+        description: >
+          Years ahead the projection refers to. Target year = base year + `horizon_years`.
+          NULL for KPIs that aren't projections.
+      - name: unit
+        description: Unit of the value (e.g. percent, SEK per inhabitant, count, index).
+        data_tests: [not_null]
+      - name: cost_role
+        description: Role of the KPI in the cost breakdown, from the translations seed.
+      - name: provider_type_code
+        description: Kolada auspice code (X, T, P, O, E, A).
+      - name: provider_type
+        description: Decoded auspice, per Kolada's definitions.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [not_applicable, total, private, public, own_operation, other_than_own]
+      - name: title_sv
+        description: Kolada's official Swedish title.
+      - name: description_sv
+        description: Kolada's official Swedish description.
+
+  - name: fct_kolada_kpi_values
+    description: >
+      Kolada KPI values per KPI x region x year, total for both genders. Values as
+      published: shares in percent (divided by 100 in reporting), NULL kept, not coalesced.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [kpi_id, region_id, period_start]
+    columns:
+      - name: kpi_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_kolada_kpi')
+                field: kpi_id
+      - name: region_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_region')
+                field: region_id
+      - name: period_start
+        description: First day of the year the value refers to.
+        data_tests: [not_null]
+      - name: amount
+        description: KPI value in the unit given by `dim_kolada_kpi.unit`.
+
   - name: fct_waiting_times_first_contact
+    description: >
+      Answered and total calls and chats to health centres per region x calendar year,
+      summed over the months reported, from Socialstyrelsen. Filtered to the centre
+      aggregate row (`Alla vårdcentraler`) and all contact types (`Alla samtal`) to avoid
+      double counting. Counts only; the answered share is computed in reporting (sum ÷ sum).
+      Stockholm doesn't report and has no rows; Västernorrland reports as one unit.
+      Partial years: 2025 covers July-December only.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
-          arguments: 
-            combination_of_columns: [region_id, period_start]
-  - name: fct_waiting_times_medical_assessments
-    data_tests:
-      - dbt_utils.unique_combination_of_columns:
-          arguments: 
+          arguments:
             combination_of_columns: [region_id, year]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "answered_calls <= total_calls"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "months_reported <= months_in_data"
+    columns:
+      - name: region_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_region')
+                field: region_id
+      - name: year
+        data_tests: [not_null]
+      - name: answered_calls
+        description: Calls and chats answered the same day, summed over the year.
+      - name: total_calls
+        description: All incoming calls and chats, summed over the year.
+      - name: months_reported
+        description: Months in the year with a reported total. Lower than `months_in_data` means incomplete reporting.
+        data_tests: [not_null]
+      - name: months_in_data
+        description: Months of the year present in the data for this region.
+        data_tests: [not_null]
+      - name: missing_months
+        description: "`months_in_data` - `months_reported`. Above 0 means the region is flagged on the page."
+        data_tests: [not_null]
+
+  - name: fct_waiting_times_medical_assessments
+    description: >
+      Medical assessments per region x calendar year, summed over the months reported,
+      from Socialstyrelsen. Filtered to the centre aggregate row (`Alla vårdcentraler`).
+      Counts only; the share within 3 days is computed in reporting (sum ÷ sum).
+      Partial years: 2025 covers July-December only.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [region_id, year]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "assessed_within_3_days <= total_assessments"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "months_reported <= months_in_data"
+    columns:
+      - name: region_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_region')
+                field: region_id
+      - name: year
+        data_tests: [not_null]
+      - name: assessed_within_3_days
+        description: Assessments within 3 days of contact (the care guarantee), summed over the year.
+      - name: total_assessments
+        description: All assessments, summed over the year.
+      - name: months_reported
+        description: Months in the year with a reported total. Lower than `months_in_data` means incomplete reporting.
+        data_tests: [not_null]
+      - name: months_in_data
+        description: Months of the year present in the data for this region.
+        data_tests: [not_null]
+      - name: missing_months
+        description: "`months_in_data` - `months_reported`. Above 0 means the region is flagged on the page."
+        data_tests: [not_null]
+
+  - name: fct_patient_surveys_regional
+    description: >
+      NPE dimension scores at region level, doctor visits, with confidence intervals.
+      One row per region x year x dimension. Includes Sweden (`0000`). The survey was
+      redesigned in autumn 2025, so these results aren't comparable with earlier NPE years.
+      Sörmland has no results and therefore no rows.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [region_id, year, dimension]
+    columns:
+      - name: region_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_region')
+                field: region_id
+      - name: year
+        data_tests: [not_null]
+      - name: dimension
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [care_and_treatment, participation, respectful_treatment,
+                         continuity, information, accessibility]
+      - name: score
+        description: Mean of all questions in the dimension, 0-100 (higher is better).
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: score_ci_half_width
+        description: >
+          ± half-width of the confidence interval, as shown in SKR's NPE results
+          tool (e.g. Sweden, care and treatment: 79.8 ± 0.2). The 2025 documentation
+          doesn't state the confidence level; earlier NPE reports used 95 %.
+      - name: score_ci_lower
+        description: score - score_ci_half_width.
+      - name: score_ci_upper
+        description: score + score_ci_half_width.
+      - name: comment
+        description: Reason a score is missing (e.g. too few respondents), translated.

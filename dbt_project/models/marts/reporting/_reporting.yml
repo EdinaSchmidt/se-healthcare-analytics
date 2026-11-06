@@ -1,14 +1,396 @@
 models:
-  - name: rpt_region_expansion_shortlist
-    description: This table has one row per year per region. It is used for BI purposes to decide in which region does it worth to open a new vårdcentral.
+  - name: rpt_region_year_metrics
+    description: >
+      One row per region x year, plus Sweden (`0000`). Combines Kolada KPIs,
+      Socialstyrelsen waiting times (first contact, medical assessment within 3 days)
+      and NPE patient survey scores, with each region compared to the national level
+      of the same year. Used for trend charts and as the base for
+      `rpt_region_expansion_shortlist`.
+      National benchmarks: Kolada and NPE use the published `0000` row. Waiting times
+      are summed over regions not changing journal systems, matching how
+      Socialstyrelsen calculates its national figure, so the raw `0000` waiting-time
+      values (all regions) differ from the benchmark.
+      Data notes: waiting times start July 2025, so 2025 covers July-December only.
+      Stockholm has no first-contact data. Sörmland has no NPE results. Nine regions
+      are changing journal systems (Blekinge, Dalarna, Gävleborg, Halland, Norrbotten,
+      Sörmland, Västerbotten, Västernorrland, Örebro); their waiting-time data is
+      flagged as unreliable.
+    config:
+      contract:
+        enforced: true
     data_tests:
       - dbt_utils.unique_combination_of_columns:
-          arguments: 
+          arguments:
             combination_of_columns: [region_id, year]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "answered_calls <= total_calls"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "assessed_within_3_days <= total_assessments"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "accessibility_score_ci_lower <= accessibility_score AND accessibility_score <= accessibility_score_ci_upper"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "continuity_score_ci_lower <= continuity_score AND continuity_score <= continuity_score_ci_upper"
+    columns:
+      # keys and region attributes
+      - name: region_id
+        data_type: string
+        description: Kolada region code. `0000` = Sweden.
+        constraints:
+          - type: not_null
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_region')
+                field: region_id
+      - name: region_short_name
+        data_type: string
+        description: Short region name without "Region" (e.g. "Skåne").
+        data_tests: [not_null]
+      - name: is_national
+        data_type: boolean
+        description: True for the Sweden row (`0000`).
+        data_tests: [not_null]
+      - name: data_quality_note
+        data_type: string
+        description: Data quality note from `dim_region` (e.g. journal system change).
+      - name: year
+        data_type: int64
+        constraints:
+          - type: not_null
+
+      # demographics (Kolada)
+      - name: residents
+        data_type: int64
+      - name: residents_projected_5y
+        data_type: int64
+      - name: residents_projection_base_year
+        data_type: int64
+      - name: residents_projection_target_year
+        data_type: int64
+      - name: residents_growth_5y
+        data_type: float64
+        description: Projected relative change in residents over 5 years.
+      - name: residents_65_plus
+        data_type: int64
+      - name: residents_65_plus_share
+        data_type: float64
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: residents_65_plus_projected_5y
+        data_type: int64
+      - name: residents_65_plus_share_projected_5y
+        data_type: float64
+      - name: residents_65_plus_projection_base_year
+        data_type: int64
+      - name: residents_65_plus_projection_target_year
+        data_type: int64
+      - name: residents_65_plus_growth_5y
+        data_type: float64
+        description: Projected relative change in residents aged 65+ over 5 years.
+      - name: care_need_index
+        data_type: float64
+        description: Care Need Index (CNI). Sweden = 1.
+
+      # Kolada primary care KPIs
+      - name: reasonable_wait_share
+        data_type: float64
+        description: >
+          Share reporting a reasonable waiting time to a health centre. The national
+          level is modest too, so being at Sweden's level doesn't mean "good".
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: national_reasonable_wait_share
+        data_type: float64
+      - name: reasonable_wait_diff
+        data_type: float64
+        description: Region - national, in share points.
+      - name: trust_share
+        data_type: float64
+        description: Share with trust in health centres.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: national_trust_share
+        data_type: float64
+      - name: trust_diff
+        data_type: float64
+        description: Region - national, in share points.
+      - name: purchase_share
+        data_type: float64
+        description: >
+          Region's purchases of primary care as a share of net cost (gross cost -
+          gross income), excluding pharmaceutical benefit costs (`N71029`). Can exceed
+          1 because purchases are gross while net cost is after income (Sörmland 2020),
+          so values above 1 raise a warning, not an error.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+          - dbt_utils.accepted_range:
+              arguments:
+                max_value: 1
+              config:
+                severity: warn
+      - name: national_purchase_share
+        data_type: float64
+      - name: purchase_share_diff
+        data_type: float64
+        description: Region - national, in share points.
+      - name: cost_per_inhabitant_sek
+        data_type: float64
+        description: Net cost of primary care, SEK per inhabitant.
+      - name: national_cost_per_inhabitant_sek
+        data_type: float64
+      - name: cost_deviation_from_national
+        data_type: float64
+        description: Relative deviation from the national cost per inhabitant.
+
+      # first contact same day (Socialstyrelsen)
+      - name: answered_calls
+        data_type: int64
+        description: Calls and chats answered the same day, summed over the year.
+      - name: total_calls
+        data_type: int64
+        description: All incoming calls and chats, summed over the year.
+      - name: first_contact_answered_share
+        data_type: float64
+        description: "`answered_calls` ÷ `total_calls`."
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: national_answered_calls
+        data_type: int64
+        description: Sum over regions not changing journal systems.
+      - name: national_total_calls
+        data_type: int64
+        description: Sum over regions not changing journal systems.
+      - name: national_first_contact_answered_share
+        data_type: float64
+      - name: data_quality_flag_first_contact_months_reported
+        data_type: int64
+      - name: data_quality_flag_first_contact_months_in_data
+        data_type: int64
+      - name: data_quality_flag_first_contact_missing_months
+        data_type: int64
+
+      # medical assessment within 3 days (Socialstyrelsen)
+      - name: assessed_within_3_days
+        data_type: int64
+        description: Assessments within 3 days of contact (the care guarantee), summed over the year.
+      - name: total_assessments
+        data_type: int64
+        description: All assessments, summed over the year.
+      - name: assessed_within_3_days_share
+        data_type: float64
+        description: "`assessed_within_3_days` ÷ `total_assessments`."
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: national_assessed_within_3_days
+        data_type: int64
+        description: Sum over regions not changing journal systems.
+      - name: national_total_assessments
+        data_type: int64
+        description: Sum over regions not changing journal systems.
+      - name: national_assessed_within_3_days_share
+        data_type: float64
+      - name: data_quality_flag_medical_assessment_months_reported
+        data_type: int64
+      - name: data_quality_flag_medical_assessment_months_in_data
+        data_type: int64
+      - name: data_quality_flag_medical_assessment_missing_months
+        data_type: int64
+
+      # NPE patient survey
+      - name: accessibility_score
+        data_type: numeric(38, 9)
+        description: NPE accessibility score, 0-100.
+      - name: accessibility_score_ci_lower
+        data_type: numeric(38, 9)
+      - name: accessibility_score_ci_upper
+        data_type: numeric(38, 9)
+      - name: continuity_score
+        data_type: numeric(38, 9)
+        description: NPE continuity score, 0-100.
+      - name: continuity_score_ci_lower
+        data_type: numeric(38, 9)
+      - name: continuity_score_ci_upper
+        data_type: numeric(38, 9)
+      - name: national_accessibility_score
+        data_type: numeric(38, 9)
+      - name: national_accessibility_score_ci_lower
+        data_type: numeric(38, 9)
+      - name: national_accessibility_score_ci_upper
+        data_type: numeric(38, 9)
+      - name: national_continuity_score
+        data_type: numeric(38, 9)
+      - name: national_continuity_score_ci_lower
+        data_type: numeric(38, 9)
+      - name: national_continuity_score_ci_upper
+        data_type: numeric(38, 9)
+      - name: accessibility_score_diff
+        data_type: numeric(38, 9)
+      - name: continuity_score_diff
+        data_type: numeric(38, 9)
+
+      # derived comparisons
+      - name: residents_65_plus_share_change_5y
+        data_type: float64
+        description: Projected change in the 65+ share over 5 years, in share points.
+      - name: first_contact_answered_share_diff_from_national
+        data_type: float64
+        description: Region - national, in share points.
+      - name: assessed_within_3_days_share_diff_from_national
+        data_type: float64
+        description: Region - national, in share points.
+
+      # data availability and reliability (NULL for Sweden)
+      - name: has_first_contact_data
+        data_type: boolean
+      - name: has_patient_survey_data
+        data_type: boolean
+      - name: has_journal_system_change
+        data_type: boolean
+      - name: is_access_data_reliable
+        data_type: boolean
+        description: False for regions changing journal systems or years with missing months of medical assessment data.
+      - name: is_first_contact_data_reliable
+        data_type: boolean
+        description: False for regions changing journal systems or years with missing months of first-contact data.
+
+  - name: rpt_region_expansion_shortlist
+    description: >
+      One row per region (Sweden excluded) for the latest year where all sources have
+      data (see `latest_complete_year`). Six flags mark where a region is below the
+      national level. TRUE = below, FALSE = not below, NULL = can't be assessed
+      (missing or unreliable data). A region is shortlisted when at least 75 % of its
+      assessable flags are TRUE and at least 4 flags are assessable. Show
+      `assessable_flags` next to `is_shortlisted`: some regions are shortlisted on
+      survey data alone.
+    config:
+      contract:
+        enforced: true
+    data_tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "score <= assessable_flags"
     columns:
       - name: region_id
+        data_type: string
+        description: Kolada region code.
+        constraints:
+          - type: not_null
         data_tests:
-          - not_null
+          - unique
+          - relationships:
+              arguments:
+                to: ref('dim_region')
+                field: region_id
+      - name: is_national
+        data_type: boolean
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [false]
+                quote: false
+      - name: region_short_name
+        data_type: string
+        data_tests: [not_null]
       - name: year
+        data_type: int64
+        constraints:
+          - type: not_null
+
+      # context (not used in the flags)
+      - name: care_need_index
+        data_type: float64
+      - name: residents_growth_5y
+        data_type: float64
+      - name: residents_65_plus_growth_5y
+        data_type: float64
+      - name: residents_65_plus_share_change_5y
+        data_type: float64
+      - name: purchase_share_diff
+        data_type: float64
+        description: >
+          Context only. A low purchased-care share can mean room for new providers or
+          an unfavourable market, so it isn't a flag.
+      - name: cost_deviation_from_national
+        data_type: float64
+
+      # differences behind the flags
+      - name: reasonable_wait_diff
+        data_type: float64
+      - name: trust_diff
+        data_type: float64
+      - name: first_contact_answered_share_diff_from_national
+        data_type: float64
+      - name: assessed_within_3_days_share_diff_from_national
+        data_type: float64
+
+      # flags
+      - name: is_access_below_national
+        data_type: boolean
+        description: Share assessed within 3 days at least 5 share points below national. NULL if access data is unreliable.
+      - name: is_first_call_below_national
+        data_type: boolean
+        description: Answered first-contact share at least 10 share points below national. NULL if data is missing or unreliable.
+      - name: is_accessibility_clearly_below_national
+        data_type: boolean
+        description: NPE accessibility CI entirely below the national CI. NULL without NPE results.
+      - name: is_continuity_clearly_below_national
+        data_type: boolean
+        description: NPE continuity CI entirely below the national CI. NULL without NPE results.
+      - name: is_reasonable_wait_below_national
+        data_type: boolean
+        description: Reasonable-wait share at least 5 share points below national.
+      - name: is_trust_below_national
+        data_type: boolean
+        description: Trust share at least 5 share points below national.
+
+      # scoring
+      - name: assessable_flags
+        data_type: int64
+        description: Number of flags that aren't NULL.
         data_tests:
           - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 6
+      - name: score
+        data_type: int64
+        description: Number of flags that are TRUE.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 6
+      - name: below_national_share
+        data_type: float64
+        description: "`score` ÷ `assessable_flags`."
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: is_shortlisted
+        data_type: boolean
+        description: True if `below_national_share` >= 0.75. NULL if fewer than 4 flags are assessable.

@@ -95,6 +95,8 @@ seeds:
           NULL where the region has no survey results.
         data_tests:
           - unique
+      - name: data_quality_note
+        description: Notes based on findings in other sources
 
   - name: npe_question_translations
     description: >
