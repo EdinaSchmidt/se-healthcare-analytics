@@ -45,7 +45,7 @@ WITH source AS (
         ,s_tra.comment AS comment
         ,src.dimension_column AS dimension_sv
         ,d_tra.dimension_code AS dimension
-        ,src.{{ value_column }}
+        ,CAST(src.{{ value_column }} AS NUMERIC) AS {{ value_column }}
         ,src.aggregation_level AS aggregation_level_sv
         ,CASE src.aggregation_level
             WHEN 'Hälso-/vårdcentral' THEN 'health_center'

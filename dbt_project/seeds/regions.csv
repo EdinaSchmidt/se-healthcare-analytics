@@ -1,23 +1,23 @@
-region_id,region_short_name,region_waiting_times,region_patient_surveys
-0000,Sweden,Alla regioner,Alla
-0001,Stockholm,Stockholm,Stockholm
-0003,Uppsala,Uppsala,Uppsala
-0004,Sörmland,Södermanland,
-0005,Östergötland,Östergötland,Östergötland
-0006,Jönköping,Jönköping,Jönköping
-0007,Kronoberg,Kronoberg,Kronoberg
-0008,Kalmar,Kalmar,Kalmar
-0009,Gotland,Gotland,Gotland
-0010,Blekinge,Blekinge,Blekinge
-0012,Skåne,Skåne,Skåne
-0013,Halland,Halland,Halland
-0014,Västra Götaland,Västra Götaland,Västra Götaland
-0017,Värmland,Värmland,Värmland
-0018,Örebro,Örebro,Örebro
-0019,Västmanland,Västmanland,Västmanland
-0020,Dalarna,Dalarna,Dalarna
-0021,Gävleborg,Gävleborg,Gävleborg
-0022,Västernorrland,Västernorrland,Västernorrland
-0023,Jämtland Härjedalen,Jämtland Härjedalen,Jämtland
-0024,Västerbotten,Västerbotten,Västerbotten
-0025,Norrbotten,Norrbotten,Norrbotten
+region_id,region_short_name,region_waiting_times,region_patient_surveys,data_quality_note
+0000,Sweden,Alla regioner,Alla,
+0001,Stockholm,Stockholm,Stockholm,
+0003,Uppsala,Uppsala,Uppsala,
+0004,Sörmland,Södermanland,,"journal system change"
+0005,Östergötland,Östergötland,Östergötland,
+0006,Jönköping,Jönköping,Jönköping,
+0007,Kronoberg,Kronoberg,Kronoberg,
+0008,Kalmar,Kalmar,Kalmar,
+0009,Gotland,Gotland,Gotland,
+0010,Blekinge,Blekinge,Blekinge,"No medical-assessment data for 2026 (journal system change)"
+0012,Skåne,Skåne,Skåne,
+0013,Halland,Halland,Halland,"Recording change between 2025 and 2026 (journal system change)"
+0014,Västra Götaland,Västra Götaland,Västra Götaland,
+0017,Värmland,Värmland,Värmland,
+0018,Örebro,Örebro,Örebro,"journal system change"
+0019,Västmanland,Västmanland,Västmanland,"Only 2-4 of ~30 centres report since Nov 2025"
+0020,Dalarna,Dalarna,Dalarna,"journal system change"
+0021,Gävleborg,Gävleborg,Gävleborg,"Partial reporting since 2025 (journal system change)"
+0022,Västernorrland,Västernorrland,Västernorrland,"journal system change"
+0023,Jämtland Härjedalen,Jämtland Härjedalen,Jämtland,
+0024,Västerbotten,Västerbotten,Västerbotten,"journal system change"
+0025,Norrbotten,Norrbotten,Norrbotten,"journal system change"

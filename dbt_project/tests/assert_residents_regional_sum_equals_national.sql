@@ -1,8 +1,12 @@
+-- The sum of regional residents must match the national total for every year.
+-- A mismatch means a region is missing, duplicated or joined incorrectly in
+-- rpt_region_year_metrics. Tolerance: 0.001% relative difference.
+
 WITH national AS (
     SELECT 
         year
         ,SUM(residents) AS residents_national
-    FROM {{ ref('rpt_region_expansion_shortlist') }}
+    FROM {{ ref('rpt_region_year_metrics') }}
     WHERE is_national
     GROUP BY 
         year
@@ -13,7 +17,7 @@ WITH national AS (
     SELECT 
         year
         ,SUM(residents) AS residents_regional
-    FROM {{ ref('rpt_region_expansion_shortlist') }}
+    FROM {{ ref('rpt_region_year_metrics') }}
     WHERE NOT is_national
     GROUP BY 
         year

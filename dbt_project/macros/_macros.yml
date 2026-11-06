@@ -1,0 +1,66 @@
+macros:
+  - name: clean_number
+    description: >
+      Converts a raw text value from a source file into a number. Values the
+      sources use for suppressed or missing data (two soft hyphens '\u00AD\u00AD',
+      'X' or 'N') become NULL. Decimal commas are replaced with dots before
+      casting, and surrounding whitespace is trimmed.
+    arguments:
+      - name: column
+        type: string
+        description: Column (or SQL expression) holding the raw text value.
+      - name: type
+        type: string
+        description: BigQuery type to cast to. Defaults to INT64; use NUMERIC or FLOAT64 for decimals.
+
+  - name: generate_schema_name
+    description: >
+      Overrides dbt's default schema naming. In prod, models with a custom schema
+      are built in that schema as-is (e.g. reporting). In every other target, the
+      custom schema is prefixed with the target schema (e.g. dbt_dev_reporting),
+      so development runs never write to prod schemas. Models without a custom
+      schema use the target schema.
+    arguments:
+      - name: custom_schema_name
+        type: string
+        description: The schema set in the model's config, or none if not set.
+      - name: node
+        type: any
+        description: The node being built. Not used, but required by dbt's signature.
+
+  - name: latest_complete_year
+    description: >
+      Returns a scalar subquery (wrapped in parentheses) with the latest year in
+      which every required column has a non-NULL value. Used to pick the most
+      recent year where all data sources are available, so the year moves forward
+      automatically when new data arrives. Use it directly in a comparison, e.g.
+      WHERE year = latest_complete_year(model, required_columns).
+    arguments:
+      - name: model
+        type: relation
+        description: Model to search, passed as ref(...). Must have a year column.
+      - name: required_columns
+        type: list
+        description: >
+          Columns that must all be non-NULL for a year to count as complete.
+          Choose one column per data source.
+
+  - name: stg_npe_dimensions
+    description: >
+      Builds a staging model for one table of the national patient survey
+      (Nationell patientenkät). Unpivots the six survey dimension columns into
+      rows, maps regions to region_id, translates comments and dimensions to
+      English using seeds, standardises aggregation level and selection, and
+      adds a surrogate key (dimension_result_key) over aggregation level, region,
+      municipality, health center, year and dimension. Called once per survey
+      table (e.g. scores, confidence interval bounds), each with its own value
+      column.
+    arguments:
+      - name: source_table
+        type: string
+        description: Table name in the patient_surveys source.
+      - name: value_column
+        type: string
+        description: >
+          Name for the unpivoted value column (e.g. score). Cast to NUMERIC
+          in the output.
