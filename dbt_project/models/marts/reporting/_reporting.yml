@@ -88,6 +88,11 @@ models:
         description: >
           Projected relative change in residents from the base year to the target year
           (`residents_projected_5y` ÷ residents in the base year - 1). Not measured from `year`.
+      - name: residents_change_5y
+        data_type: int64
+        description: >
+          Projected change in the number of residents from the base year to the target year
+          (`residents_projected_5y` - residents in the base year). Not measured from `year`.
       - name: residents_65_plus
         data_type: int64
       - name: residents_65_plus_share
@@ -116,6 +121,11 @@ models:
         description: >
           Projected relative change in residents aged 65+ from the base year to the target
           year (projected ÷ 65+ residents in the base year - 1). Not measured from `year`.
+      - name: residents_65_plus_change_5y
+        data_type: int64
+        description: >
+          Projected change in the number of residents aged 65+ from the base year to the target
+          year (`residents_65_plus_projected_5y` - 65+ residents in the base year). Not measured from `year`.
       - name: care_need_index
         data_type: float64
         description: Care Need Index (CNI). Sweden = 1.
@@ -303,12 +313,15 @@ models:
   - name: rpt_region_expansion_shortlist
     description: >
       One row per region (Sweden excluded) for the latest year where all sources have
-      data (see `latest_complete_year`). Six flags mark where a region is below the
-      national level. TRUE = below, FALSE = not below, NULL = can't be assessed
-      (missing or unreliable data). A region is shortlisted when at least 75 % of its
-      assessable flags are TRUE and at least 4 flags are assessable. Show
-      `assessable_flags` next to `is_shortlisted`: some regions are shortlisted on
-      survey data alone.
+      data (see `latest_complete_year`). A region is shortlisted when it has an access gap
+      and its projected growth in residents aged 65+ is above the median region's.
+      Six flags mark where a region is below the national level: TRUE = below,
+      FALSE = not below, NULL = can't be assessed (missing or unreliable data).
+      The access gap comes from the two waiting-time flags; when neither can be assessed,
+      it falls back on the two access surveys agreeing (NPE accessibility and reasonable
+      waiting time), see `access_gap_source`. Continuity and trust are supporting evidence.
+      `is_shortlisted` is NULL only when the access gap can't be determined either way and
+      demand is above the median: a candidate to verify, not a pass or a fail.
     config:
       contract:
         enforced: true
@@ -316,6 +329,9 @@ models:
       - dbt_utils.expression_is_true:
           arguments:
             expression: "score <= assessable_flags"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "is_shortlisted IS NOT TRUE OR (has_access_gap AND is_demand_above_median)"
     columns:
       - name: region_id
         data_type: string
@@ -343,15 +359,23 @@ models:
         constraints:
           - type: not_null
 
-      # context (not used in the flags)
+      # demand (residents_65_plus_change_5y is part of the rule; the rest is context)
       - name: care_need_index
         data_type: float64
       - name: residents_growth_5y
         data_type: float64
         description: From the latest SCB projection, measured from its base year (see `rpt_region_year_metrics`).
+      - name: residents_change_5y
+        data_type: int64
+        description: Projected change in residents, from the latest SCB projection, measured from its base year.
       - name: residents_65_plus_growth_5y
         data_type: float64
         description: From the latest SCB projection, measured from its base year (see `rpt_region_year_metrics`).
+      - name: residents_65_plus_change_5y
+        data_type: int64
+        description: >
+          Projected change in residents aged 65+, from the latest SCB projection, measured from its
+          base year. Compared with `residents_65_plus_change_5y_median` for the demand part of the rule.
       - name: residents_65_plus_share_change_5y
         data_type: float64
         description: From the latest SCB projection, measured from its base year (see `rpt_region_year_metrics`).
@@ -414,12 +438,39 @@ models:
                 max_value: 6
       - name: below_national_share
         data_type: float64
-        description: "`score` ÷ `assessable_flags`."
+        description: "`score` ÷ `assessable_flags`. Supporting evidence, not part of the rule."
         data_tests:
           - dbt_utils.accepted_range:
               arguments:
                 min_value: 0
                 max_value: 1
+
+      # rule
+      - name: has_access_gap
+        data_type: boolean
+        description: >
+          TRUE if at least one waiting-time flag is TRUE (`is_access_below_national` or
+          `is_first_call_below_national`), FALSE if at least one can be assessed and none is TRUE.
+          When neither can be assessed: `is_accessibility_clearly_below_national` AND
+          `is_reasonable_wait_below_national` (three-valued, so NULL if that can't be decided).
+      - name: access_gap_source
+        data_type: string
+        description: >
+          Where `has_access_gap` comes from: waiting_times (at least one waiting-time flag can be
+          assessed), surveys (the survey fallback decided it), NULL (can't be determined).
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [waiting_times, surveys]
+      - name: residents_65_plus_change_5y_median
+        data_type: float64
+        description: Median of `residents_65_plus_change_5y` across the regions in the shortlist year.
+      - name: is_demand_above_median
+        data_type: boolean
+        description: "`residents_65_plus_change_5y` above the median region's. NULL without a projection."
       - name: is_shortlisted
         data_type: boolean
-        description: True if `below_national_share` >= 0.75. NULL if fewer than 4 flags are assessable.
+        description: >
+          `has_access_gap` AND `is_demand_above_median`, with SQL's three-valued AND: NULL when the
+          access gap can't be determined and demand is above the median (a candidate to verify),
+          FALSE when either part is FALSE.

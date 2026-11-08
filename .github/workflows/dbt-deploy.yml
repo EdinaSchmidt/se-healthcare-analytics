@@ -7,8 +7,15 @@ name: dbt deploy
 on:
   push:
     branches: [main]
+    # Only changes that alter what dbt builds in prod. Later "!" patterns exclude files that
+    # dbt build never runs: the report (dbt Charts), analyses and helper scripts.
     paths:
       - "dbt_project/**"
+      - "!dbt_project/charts/**"
+      - "!dbt_project/chart_styles/**"
+      - "!dbt_project/dbt_charts.yml"
+      - "!dbt_project/analyses/**"
+      - "!dbt_project/scripts/**"
   workflow_dispatch:
 
 permissions:

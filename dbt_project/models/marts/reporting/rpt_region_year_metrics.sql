@@ -265,11 +265,13 @@ SELECT
     ,p.projection_base_year AS residents_projection_base_year
     ,p.residents_projection_target_year
     ,SAFE_DIVIDE(p.residents_projected_5y, p.residents_at_projection_base) - 1 AS residents_growth_5y
+    ,p.residents_projected_5y - p.residents_at_projection_base AS residents_change_5y
     ,p.residents_65_plus_projected_5y
     ,SAFE_DIVIDE(p.residents_65_plus_projected_5y, p.residents_projected_5y) AS residents_65_plus_share_projected_5y
     ,p.projection_base_year AS residents_65_plus_projection_base_year
     ,p.residents_65_plus_projection_target_year
     ,SAFE_DIVIDE(p.residents_65_plus_projected_5y, p.residents_65_plus_at_projection_base) - 1 AS residents_65_plus_growth_5y
+    ,p.residents_65_plus_projected_5y - p.residents_65_plus_at_projection_base AS residents_65_plus_change_5y
     ,SAFE_DIVIDE(p.residents_65_plus_projected_5y, p.residents_projected_5y)
         - SAFE_DIVIDE(p.residents_65_plus_at_projection_base, p.residents_at_projection_base)
         AS residents_65_plus_share_change_5y

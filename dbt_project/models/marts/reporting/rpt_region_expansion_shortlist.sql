@@ -6,7 +6,9 @@ WITH flags AS (
         ,year
         ,care_need_index
         ,residents_growth_5y
+        ,residents_change_5y
         ,residents_65_plus_growth_5y
+        ,residents_65_plus_change_5y
         ,residents_65_plus_share_change_5y
         ,reasonable_wait_diff
         ,trust_diff
@@ -96,12 +98,38 @@ WITH flags AS (
         AND NOT is_national
 )
 
-SELECT 
+,rule_inputs AS (
+    SELECT
+        *
+        ,SAFE_DIVIDE(score, assessable_flags) AS below_national_share
+
+        -- Access gap: at least one measured access check met; one assessable check is enough to
+        -- say FALSE. When neither can be assessed (unreliable or missing waiting-time data), fall
+        -- back on the two access surveys: a gap only when patients (NPE accessibility) and
+        -- residents (reasonable waiting time) agree. Three-valued AND: NULL if a survey is missing
+        -- and the other doesn't already rule the gap out.
+        ,CASE
+            WHEN is_access_below_national OR is_first_call_below_national THEN TRUE
+            WHEN is_access_below_national IS NOT NULL OR is_first_call_below_national IS NOT NULL THEN FALSE
+            ELSE is_accessibility_clearly_below_national AND is_reasonable_wait_below_national
+            END AS has_access_gap
+
+        ,CASE
+            WHEN is_access_below_national IS NOT NULL OR is_first_call_below_national IS NOT NULL THEN 'waiting_times'
+            WHEN (is_accessibility_clearly_below_national AND is_reasonable_wait_below_national) IS NOT NULL THEN 'surveys'
+            END AS access_gap_source
+
+        -- Demand: projected growth in residents aged 65+ against the median region of the same year
+        ,PERCENTILE_CONT(residents_65_plus_change_5y, 0.5) OVER () AS residents_65_plus_change_5y_median
+    FROM flags_calc
+)
+
+SELECT
     *
-    ,SAFE_DIVIDE(score, assessable_flags) AS below_national_share
+    ,residents_65_plus_change_5y > residents_65_plus_change_5y_median AS is_demand_above_median
 
-    ,CASE WHEN assessable_flags < 4 THEN NULL
-        WHEN SAFE_DIVIDE(score, assessable_flags) >= 0.75 THEN TRUE
-        ELSE FALSE END AS is_shortlisted
+    -- Shortlisted: an access gap AND demand above the median region. Three-valued AND, so a
+    -- region with unreliable access data is NULL (can't judge) unless its demand is too low.
+    ,(has_access_gap AND residents_65_plus_change_5y > residents_65_plus_change_5y_median) AS is_shortlisted
 
-FROM flags_calc
+FROM rule_inputs
