@@ -19,4 +19,4 @@ style:
       # dbt-grays stops are absolute colors; revisit this pin if the boards leave a dark theme.
       region_short_name:
         values:
-          Sweden: dbt-grays.canvas
+          Sweden: "dbt-grays.1"

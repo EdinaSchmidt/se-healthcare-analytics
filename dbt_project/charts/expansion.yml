@@ -1,0 +1,612 @@
+_schema_version: "0.11.0"  # written automatically by dct migrate
+title: Where should a private health centre operator expand next?
+extends: ../chart_styles/base.yml
+
+style:
+  formats:
+    # gaps to Sweden in percentage points, shown with a % sign
+    pct: { spec: "+.1f", suffix: "%" }
+    pct_axis: { spec: ".0f", suffix: "%" }
+    pct_table: { spec: ".1f", suffix: "%" }
+    score_table: { spec: ".1f" }
+    index: { spec: ".2f" }
+  charts:
+    bar:
+      marks:
+        # thicker bars, labels outside the bar end
+        bar:
+          max_size: 16
+          labels: { position: above }
+      axis_x:
+        labels: { min_gap: 2 }
+    category_colors:
+      # orange = a check is met, cyan = not met, gold = the region picked in "Highlight region"
+      # (with nothing picked, the gold pin raises WARN-CATEGORY-COLOR-PIN-UNSEEN: expected, harmless)
+      check_status:
+        values:
+          Check met: category.orange
+          Check not met: category.cyan
+          Selected region: category.gold
+      shortlist_group:
+        values:
+          Shortlisted: category.orange
+          Other regions: category.cyan
+          Selected region: category.gold
+
+variables:
+  highlight:
+    label: Highlight region
+    options: { query: region_list, column: region }
+
+queries:
+  # Every region plus Sweden for the shortlist year (the latest year where every source has
+  # data, picked by latest_complete_year in rpt_region_expansion_shortlist), with the
+  # shortlist's flags and rule joined on. is_selected marks the "Highlight region" pick
+  # (never true when nothing is picked).
+  base:
+    sql: |
+      WITH shortlist AS (
+          SELECT * FROM {{ ref('rpt_region_expansion_shortlist') }}
+      )
+      SELECT
+          m.*
+          ,s.is_shortlisted
+          ,s.has_access_gap
+          ,s.access_gap_source
+          ,s.is_demand_above_median
+          ,s.residents_65_plus_change_5y_median
+          ,s.is_access_below_national
+          ,s.is_first_call_below_national
+          ,s.is_accessibility_clearly_below_national
+          ,s.is_continuity_clearly_below_national
+          ,s.is_reasonable_wait_below_national
+          ,s.is_trust_below_national
+          ,{{ filter('m.region_short_name', highlight, none='deny') }} AS is_selected
+          ,CASE
+              WHEN {{ filter('m.region_short_name', highlight, none='deny') }} THEN 'Selected region'
+              WHEN s.is_shortlisted THEN 'Shortlisted'
+              ELSE 'Other regions'
+              END AS shortlist_group
+      FROM {{ ref('rpt_region_year_metrics') }} m
+      LEFT JOIN shortlist s
+          ON s.region_id = m.region_id AND s.year = m.year
+      WHERE m.year = (SELECT MAX(year) FROM shortlist)
+
+  region_list:
+    sql: |
+      SELECT region_short_name AS region
+      FROM {{ queries.base }}
+      WHERE NOT is_national
+      ORDER BY region
+
+  summary:
+    sql: |
+      SELECT
+          ANY_VALUE(year) AS year
+          ,MAX(residents_projection_base_year) AS base_year
+          ,MAX(residents_projection_target_year) AS target_year
+          ,MAX(data_quality_flag_medical_assessment_months_in_data) AS months
+          ,FORMAT("%'d", CAST(MAX(residents_65_plus_change_5y_median) AS INT64)) AS median_65_plus_change
+          ,IFNULL(STRING_AGG(IF(is_shortlisted, region_short_name, NULL), ', ' ORDER BY residents_65_plus_change_5y DESC), 'none') AS shortlisted_names
+          ,COUNTIF(is_shortlisted IS NULL AND NOT is_national) AS n_candidates
+          ,IFNULL(STRING_AGG(IF(is_shortlisted IS NULL AND NOT is_national, region_short_name, NULL), ', ' ORDER BY region_short_name), '') AS candidate_names
+          ,IFNULL(STRING_AGG(IF(has_journal_system_change, region_short_name, NULL), ', ' ORDER BY region_short_name), 'none') AS journal_names
+          ,IFNULL(STRING_AGG(IF(NOT is_national AND has_first_contact_data IS NOT TRUE, region_short_name, NULL), ', ' ORDER BY region_short_name), '') AS first_contact_not_reported
+          ,IFNULL(STRING_AGG(IF(NOT is_national AND NOT has_journal_system_change
+              AND (data_quality_flag_medical_assessment_missing_months > 0 OR data_quality_flag_first_contact_missing_months > 0)
+              , region_short_name, NULL), ', ' ORDER BY region_short_name), '') AS incomplete_months_names
+          ,FORMAT('%.0f %%', MAX(national_assessed_within_3_days_share) * 100) AS sweden_assessed_share
+          ,FORMAT('%.0f %%', MAX(national_first_contact_answered_share) * 100) AS sweden_first_contact_share
+          ,IFNULL(STRING_AGG(IF(NOT is_national AND has_patient_survey_data IS NOT TRUE, region_short_name, NULL), ', ' ORDER BY region_short_name), '') AS no_npe_names
+          ,IFNULL(STRING_AGG(IF(NOT is_national AND (reasonable_wait_share IS NULL OR trust_share IS NULL), region_short_name, NULL), ', ' ORDER BY region_short_name), '') AS no_kolada_opinion_names
+      FROM {{ queries.base }}
+
+  # ---- top: the shortlist ------------------------------------------------------------------
+
+  # Gaps to Sweden as numbers; the table adds ▲/▼ by sign. NULL = not assessed.
+  shortlisted:
+    sql: |
+      SELECT
+          region_short_name AS region
+          -- why the rule picked the region, built from the same flags as is_shortlisted:
+          -- the access part, the demand part, then failed supporting checks and data caveats
+          ,CONCAT(
+              'Access: '
+              ,CASE
+                  WHEN access_gap_source = 'surveys' THEN CONCAT(
+                      'waiting times not usable (', IF(has_journal_system_change, 'journal system change', 'incomplete data')
+                      ,'), but patients and residents both rate access below Sweden.')
+                  ELSE CONCAT(ARRAY_TO_STRING(ARRAY_CONCAT(
+                      IF(is_access_below_national
+                          , [FORMAT('%.1f%% fewer assessed within 3 days', ABS(ROUND(assessed_within_3_days_share_diff_from_national * 100, 1)))], [])
+                      ,IF(is_first_call_below_national
+                          , [FORMAT('%.1f%% fewer calls answered the same day', ABS(ROUND(first_contact_answered_share_diff_from_national * 100, 1)))], [])
+                  ), ' and '), ' than Sweden.')
+                  END
+              ,FORMAT(" Demand: +%'d aged 65+ by %d (median region +%'d).", residents_65_plus_change_5y
+                  , residents_projection_target_year, CAST(residents_65_plus_change_5y_median AS INT64))
+              ,CASE ARRAY_LENGTH(also_below)
+                  WHEN 0 THEN ''
+                  WHEN 1 THEN CONCAT(' Also below Sweden on ', also_below[OFFSET(0)], '.')
+                  ELSE CONCAT(' Also below Sweden on '
+                      ,ARRAY_TO_STRING(ARRAY(
+                          SELECT check_name FROM UNNEST(also_below) AS check_name WITH OFFSET AS pos
+                          WHERE pos < ARRAY_LENGTH(also_below) - 1 ORDER BY pos), ', ')
+                      ,' and ', also_below[OFFSET(ARRAY_LENGTH(also_below) - 1)], '.')
+                  END
+              ,IF(NOT IFNULL(has_journal_system_change, FALSE) AND data_quality_note IS NOT NULL
+                  , CONCAT(' Note: ', LOWER(SUBSTR(data_quality_note, 1, 1)), SUBSTR(data_quality_note, 2), '.'), '')
+          ) AS why_shortlisted
+          ,residents_65_plus_change_5y AS more_65_plus
+          ,residents_change_5y AS more_residents
+          ,IF(is_access_below_national IS NULL, NULL
+              , ROUND(assessed_within_3_days_share_diff_from_national * 100, 1) + 0.0) AS assessed_within_3_days
+          ,IF(is_first_call_below_national IS NULL, NULL
+              , ROUND(first_contact_answered_share_diff_from_national * 100, 1) + 0.0) AS calls_answered
+          ,ROUND(CAST(accessibility_score_diff AS FLOAT64), 1) + 0.0 AS npe_accessibility
+          ,ROUND(CAST(continuity_score_diff AS FLOAT64), 1) + 0.0 AS npe_continuity
+          ,ROUND(reasonable_wait_diff * 100, 1) + 0.0 AS reasonable_wait
+          ,ROUND(trust_diff * 100, 1) + 0.0 AS trust
+          -- context: competition in words instead of a signed number
+          ,CASE WHEN purchase_share_diff IS NULL THEN 'no data'
+              WHEN purchase_share_diff < 0 THEN 'Less contested' ELSE 'More contested' END AS competition
+      FROM (
+          SELECT
+              *
+              -- supporting checks below Sweden that the access part didn't already use
+              ,ARRAY_CONCAT(
+                  IF(is_accessibility_clearly_below_national AND access_gap_source != 'surveys', ['NPE accessibility'], [])
+                  ,IF(is_continuity_clearly_below_national, ['NPE continuity'], [])
+                  ,IF(is_reasonable_wait_below_national AND access_gap_source != 'surveys', ['reasonable wait'], [])
+                  ,IF(is_trust_below_national, ['trust'], [])
+              ) AS also_below
+          FROM {{ queries.base }}
+          WHERE is_shortlisted
+      )
+      ORDER BY residents_65_plus_change_5y DESC
+    formats:
+      more_65_plus: delta
+      more_residents: delta
+      assessed_within_3_days: pct_table
+      calls_answered: pct_table
+      npe_accessibility: score_table
+      npe_continuity: score_table
+      reasonable_wait: pct_table
+      trust: pct_table
+
+  # ---- Q1: access (regions with reliable waiting-time data only) ---------------------------
+
+  q1_first_contact:
+    sql: |
+      SELECT
+          region_short_name AS region
+          ,ROUND(first_contact_answered_share_diff_from_national * 100, 1) + 0.0 AS gap_to_sweden
+          ,CASE WHEN is_selected THEN 'Selected region'
+              WHEN is_first_call_below_national THEN 'Check met' ELSE 'Check not met' END AS check_status
+      FROM {{ queries.base }}
+      WHERE NOT is_national AND is_first_contact_data_reliable IS TRUE AND has_first_contact_data
+    formats:
+      gap_to_sweden: pct
+
+  q1_assessed:
+    sql: |
+      SELECT
+          region_short_name AS region
+          ,ROUND(assessed_within_3_days_share_diff_from_national * 100, 1) + 0.0 AS gap_to_sweden
+          ,CASE WHEN is_selected THEN 'Selected region'
+              WHEN is_access_below_national THEN 'Check met' ELSE 'Check not met' END AS check_status
+      FROM {{ queries.base }}
+      WHERE NOT is_national AND is_access_data_reliable IS TRUE
+    formats:
+      gap_to_sweden: pct
+
+  # ---- Q2: patient and resident views ------------------------------------------------------
+
+  # NPE scores relative to Sweden's score, with the region's and Sweden's confidence intervals.
+  q2_npe:
+    sql: |
+      SELECT
+          region_short_name AS region
+          ,'Accessibility' AS dimension
+          ,ROUND(CAST(accessibility_score - national_accessibility_score AS FLOAT64), 1) + 0.0 AS score_vs_sweden
+          ,ROUND(CAST(accessibility_score_ci_lower - national_accessibility_score AS FLOAT64), 1) + 0.0 AS ci_lower_vs_sweden
+          ,ROUND(CAST(accessibility_score_ci_upper - national_accessibility_score AS FLOAT64), 1) + 0.0 AS ci_upper_vs_sweden
+          ,CASE WHEN is_selected THEN 'Selected region'
+              WHEN is_accessibility_clearly_below_national THEN 'Check met' ELSE 'Check not met' END AS check_status
+          ,ROUND(CAST(national_accessibility_score_ci_lower - national_accessibility_score AS FLOAT64), 1) + 0.0 AS sweden_ci_lower
+          ,ROUND(CAST(national_accessibility_score_ci_upper - national_accessibility_score AS FLOAT64), 1) + 0.0 AS sweden_ci_upper
+          ,"Sweden's interval" AS sweden_band
+      FROM {{ queries.base }}
+      WHERE NOT is_national AND has_patient_survey_data
+      UNION ALL
+      SELECT
+          region_short_name
+          ,'Continuity'
+          ,ROUND(CAST(continuity_score - national_continuity_score AS FLOAT64), 1) + 0.0
+          ,ROUND(CAST(continuity_score_ci_lower - national_continuity_score AS FLOAT64), 1) + 0.0
+          ,ROUND(CAST(continuity_score_ci_upper - national_continuity_score AS FLOAT64), 1) + 0.0
+          ,CASE WHEN is_selected THEN 'Selected region'
+              WHEN is_continuity_clearly_below_national THEN 'Check met' ELSE 'Check not met' END
+          ,ROUND(CAST(national_continuity_score_ci_lower - national_continuity_score AS FLOAT64), 1) + 0.0
+          ,ROUND(CAST(national_continuity_score_ci_upper - national_continuity_score AS FLOAT64), 1) + 0.0
+          ,"Sweden's interval"
+      FROM {{ queries.base }}
+      WHERE NOT is_national AND has_patient_survey_data
+
+  q2_npe_accessibility:
+    sql: SELECT * FROM {{ queries.q2_npe }} WHERE dimension = 'Accessibility'
+
+  q2_npe_continuity:
+    sql: SELECT * FROM {{ queries.q2_npe }} WHERE dimension = 'Continuity'
+
+  q2_reasonable_wait:
+    sql: |
+      SELECT
+          region_short_name AS region
+          ,ROUND(reasonable_wait_diff * 100, 1) + 0.0 AS gap_to_sweden
+          ,CASE WHEN is_selected THEN 'Selected region'
+              WHEN is_reasonable_wait_below_national THEN 'Check met' ELSE 'Check not met' END AS check_status
+      FROM {{ queries.base }}
+      WHERE NOT is_national AND reasonable_wait_diff IS NOT NULL
+    formats:
+      gap_to_sweden: pct
+
+  q2_trust:
+    sql: |
+      SELECT
+          region_short_name AS region
+          ,ROUND(trust_diff * 100, 1) + 0.0 AS gap_to_sweden
+          ,CASE WHEN is_selected THEN 'Selected region'
+              WHEN is_trust_below_national THEN 'Check met' ELSE 'Check not met' END AS check_status
+      FROM {{ queries.base }}
+      WHERE NOT is_national AND trust_diff IS NOT NULL
+    formats:
+      gap_to_sweden: pct
+
+  # ---- Q3: demand (65+ growth is part of the rule; the rest is context) --------------------
+
+  q3_more_65_plus:
+    sql: |
+      SELECT
+          region_short_name AS region
+          ,shortlist_group
+          ,residents_65_plus_change_5y AS more_65_plus
+          ,residents_65_plus_change_5y_median AS median_region
+      FROM {{ queries.base }}
+      WHERE NOT is_national AND residents_65_plus_change_5y IS NOT NULL
+    formats:
+      more_65_plus: delta
+      median_region: integer
+
+  q3_more_residents:
+    sql: |
+      SELECT region_short_name AS region, shortlist_group, residents_change_5y AS more_residents
+      FROM {{ queries.base }}
+      WHERE NOT is_national AND residents_change_5y IS NOT NULL
+    formats:
+      more_residents: delta
+
+  # CNI: Sweden = 1 (Kolada has no row for Sweden), so Sweden is a rule rather than a bar.
+  q3_care_need:
+    sql: |
+      SELECT
+          region_short_name AS region
+          ,shortlist_group
+          ,ROUND(care_need_index, 2) AS care_need_index
+          ,1.0 AS index_base
+          ,FORMAT('%.2f', care_need_index) AS index_label
+      FROM {{ queries.base }}
+      WHERE care_need_index IS NOT NULL
+    formats:
+      care_need_index: index
+
+charts:
+  shortlisted_table:
+    type: table
+    query: shortlisted
+    style:
+      columns:
+        why_shortlisted: { width: 360 }
+        more_65_plus:
+          label: "65+, change"
+          scale:
+            background: { palette: dbt-seq-blue-dark }
+        more_residents:
+          label: "Residents, change"
+          # growth in blue shades (from 0), a decline in orange via the rule below
+          scale:
+            background: { palette: dbt-seq-blue-dark, min: 0 }
+        assessed_within_3_days: { label: Assessed ≤ 3 days }
+        npe_accessibility: { label: NPE accessibility }
+        npe_continuity: { label: NPE continuity }
+    # ▼ below Sweden (orange), ▲ at or above (cyan); blank cell = not assessed
+    conditional_formatting:
+      more_residents:
+        when:
+          - lt: 0
+            background: category.orange
+      assessed_within_3_days: &direction
+        when:
+          - lt: 0
+            glyph: "▼"
+            glyph_color: category.orange
+          - gte: 0
+            glyph: "▲"
+            glyph_color: category.cyan
+      calls_answered: *direction
+      npe_accessibility: *direction
+      npe_continuity: *direction
+      reasonable_wait: *direction
+      trust: *direction
+
+  q1_first_contact_chart:
+    type: bar
+    query: q1_first_contact
+    title: Calls answered the same day
+    subtitle: "Gap to Sweden ({{ queries.summary.one.sweden_first_contact_share }}). Check: 10 % or more below."
+    x: region
+    y: gap_to_sweden
+    color: check_status
+    sort: { by: gap_to_sweden }
+    height: 250
+    annotations:
+      - type: rule
+        y: -10
+    style:
+      orientation: horizontal
+      axis_y:
+        labels: { format: pct_axis }
+      marks:
+        bar:
+          labels: { visible: true, format: pct }
+
+  q1_assessed_chart:
+    type: bar
+    query: q1_assessed
+    title: Medical assessment within 3 days
+    subtitle: "Gap to Sweden ({{ queries.summary.one.sweden_assessed_share }}). Check: 5 % or more below."
+    x: region
+    y: gap_to_sweden
+    color: check_status
+    sort: { by: gap_to_sweden }
+    height: 250
+    annotations:
+      - type: rule
+        y: -5
+    style:
+      orientation: horizontal
+      axis_y:
+        labels: { format: pct_axis }
+      marks:
+        bar:
+          labels: { visible: true, format: pct }
+
+  q2_npe_accessibility_chart:
+    type: bar
+    query: q2_npe_accessibility
+    title: "Patients (NPE): accessibility"
+    subtitle: Score vs Sweden with confidence intervals. Check met when the region's interval is below Sweden's (the band).
+    # Sweden's interval is a narrow reference band, not a series to compare
+    warnings_ignore: [WARN-LAYERED-CHART-SHARED-Y-AXIS-SCALE-MISMATCH]
+    x: region
+    y: ci_upper_vs_sweden
+    y_start: ci_lower_vs_sweden
+    color: check_status
+    sort: { by: score_vs_sweden }
+    height: 380
+    layers:
+      - type: bar
+        y: sweden_ci_upper
+        y_start: sweden_ci_lower
+        color: sweden_band
+        label: Sweden's interval
+        style:
+          marks:
+            bar: { band_width: 1, opacity: 0.5 }
+      - type: scatter
+        y: score_vs_sweden
+        label: Score
+        style:
+          marks:
+            point:
+              color: "dbt-grays.1"
+    annotations:
+      - type: rule
+        y: 0
+    style:
+      orientation: horizontal
+      marks:
+        bar:
+          band_width: 0.3
+
+  q2_npe_continuity_chart:
+    type: bar
+    query: q2_npe_continuity
+    title: "Patients (NPE): continuity"
+    subtitle: Score vs Sweden with confidence intervals. Check met when the region's interval is below Sweden's (the band).
+    # Sweden's interval is a narrow reference band, not a series to compare
+    warnings_ignore: [WARN-LAYERED-CHART-SHARED-Y-AXIS-SCALE-MISMATCH]
+    x: region
+    y: ci_upper_vs_sweden
+    y_start: ci_lower_vs_sweden
+    color: check_status
+    sort: { by: score_vs_sweden }
+    height: 380
+    layers:
+      - type: bar
+        y: sweden_ci_upper
+        y_start: sweden_ci_lower
+        color: sweden_band
+        label: Sweden's interval
+        style:
+          marks:
+            bar: { band_width: 1, opacity: 0.5 }
+      - type: scatter
+        y: score_vs_sweden
+        label: Score
+        style:
+          marks:
+            point:
+              color: "dbt-grays.1"
+    annotations:
+      - type: rule
+        y: 0
+    style:
+      orientation: horizontal
+      marks:
+        bar:
+          band_width: 0.3
+
+  q2_reasonable_wait_chart:
+    type: bar
+    query: q2_reasonable_wait
+    title: "Residents: waiting time is reasonable"
+    subtitle: "Gap to Sweden (Hälso- och sjukvårdsbarometern). Check: 5 % or more below."
+    x: region
+    y: gap_to_sweden
+    color: check_status
+    sort: { by: gap_to_sweden }
+    height: 380
+    annotations:
+      - type: rule
+        y: -5
+    style:
+      orientation: horizontal
+      axis_y:
+        labels: { format: pct_axis }
+      marks:
+        bar:
+          labels: { visible: true, format: pct }
+
+  q2_trust_chart:
+    type: bar
+    query: q2_trust
+    title: "Residents: trust in health centres"
+    subtitle: "Gap to Sweden (Hälso- och sjukvårdsbarometern). Check: 5 % or more below."
+    x: region
+    y: gap_to_sweden
+    color: check_status
+    sort: { by: gap_to_sweden }
+    height: 380
+    annotations:
+      - type: rule
+        y: -5
+    style:
+      orientation: horizontal
+      axis_y:
+        labels: { format: pct_axis }
+      marks:
+        bar:
+          labels: { visible: true, format: pct }
+
+  q3_more_65_plus_chart:
+    type: bar
+    query: q3_more_65_plus
+    title: "Residents 65+: change by {{ queries.summary.one.target_year }}"
+    subtitle: "People (SCB). Part of the rule: above the median region (+{{ queries.summary.one.median_65_plus_change }}, dashed)."
+    # the median is a constant reference line, not a series to compare
+    warnings_ignore: [WARN-LAYERED-CHART-SHARED-Y-AXIS-SCALE-MISMATCH]
+    x: region
+    y: more_65_plus
+    color: shortlist_group
+    sort: { by: more_65_plus, order: desc }
+    height: 380
+    layers:
+      - type: line
+        y: median_region
+        label: Median region
+        style:
+          marks:
+            line:
+              stroke:
+                color: "dbt-grays.1"
+                dasharray: 4 3
+    style:
+      orientation: horizontal
+      marks:
+        bar:
+          labels: { visible: true }
+
+  q3_more_residents_chart:
+    type: bar
+    query: q3_more_residents
+    title: "Residents: change by {{ queries.summary.one.target_year }}"
+    subtitle: People (SCB). Context.
+    x: region
+    y: more_residents
+    color: shortlist_group
+    sort: { by: more_residents, order: desc }
+    height: 380
+    style:
+      orientation: horizontal
+      marks:
+        bar:
+          labels: { visible: true }
+
+  q3_care_need_chart:
+    type: bar
+    query: q3_care_need
+    title: Care Need Index
+    subtitle: Above 1 = higher risk of ill health than Sweden. Context.
+    x: region
+    y: care_need_index
+    y_start: index_base
+    color: shortlist_group
+    sort: { by: care_need_index, order: desc }
+    height: 380
+    annotations:
+      - type: rule
+        y: 1
+    style:
+      orientation: horizontal
+      marks:
+        bar:
+          labels: { visible: true, field: index_label }
+
+rows:
+  - title: "Shortlist {{ queries.summary.one.year }}: {{ queries.summary.one.shortlisted_names }}"
+    text: |
+      **Shortlisted** = patients wait longer than in Sweden **and** the number of residents aged 65+ grows more than in
+      the median region by {{ queries.summary.one.target_year }} (+{{ queries.summary.one.median_65_plus_change }}).
+      Where waiting times can't be used, patients and residents both rating access below Sweden counts instead.
+      ▼ below Sweden, ▲ at or above.
+      {% if queries.summary.one.n_candidates > 0 %}**Can't be judged yet** (growing demand, access gap unclear):
+      {{ queries.summary.one.candidate_names }}.{% endif %}
+  - shortlisted_table
+
+  - title: 1. Where is access worst?
+    text: |
+      Excluded, journal system change: {{ queries.summary.one.journal_names }}. Their access gap comes from the surveys
+      in question 2.
+      {% if queries.summary.one.first_contact_not_reported %}{{ queries.summary.one.first_contact_not_reported }} doesn't
+      report calls.{% endif %}{% if queries.summary.one.incomplete_months_names %} Incomplete months:
+      {{ queries.summary.one.incomplete_months_names }}.{% endif %}
+  - cols:
+      - q1_first_contact_chart
+      - q1_assessed_chart
+
+  - title: 2. Where are patients least satisfied?
+    text: |
+      {% if queries.summary.one.no_npe_names %}Excluded: {{ queries.summary.one.no_npe_names }} (no NPE results). {% endif %}{% if queries.summary.one.no_kolada_opinion_names %}No resident survey: {{ queries.summary.one.no_kolada_opinion_names }}. {% endif %}Accessibility and reasonable wait stand in for waiting times where those can't be used; continuity and trust are supporting evidence.
+  - cols:
+      - q2_npe_accessibility_chart
+      - q2_npe_continuity_chart
+  - cols:
+      - q2_reasonable_wait_chart
+      - q2_trust_chart
+
+  - title: 3. Where is demand highest?
+    text: |
+      In people, not percent: a new centre needs listed patients. Shortlisted regions in orange.
+  - cols:
+      - q3_more_65_plus_chart
+      - q3_more_residents_chart
+      - q3_care_need_chart
+
+  - title: About the data
+    text: |
+      Gaps to Sweden are in percentage points, shown with %. Socialstyrelsen waiting times (monthly from July 2025,
+      {{ queries.summary.one.months }} months in {{ queries.summary.one.year }}; Sweden = the official figure, without
+      regions changing journal systems) · SKR patient survey NPE {{ queries.summary.one.year }} · Kolada:
+      Hälso- och sjukvårdsbarometern (residents), purchase share (N71029), Care Need Index (N00992), SCB projections
+      {{ queries.summary.one.base_year }}–{{ queries.summary.one.target_year }}.
