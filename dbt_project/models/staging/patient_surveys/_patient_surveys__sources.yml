@@ -95,7 +95,7 @@ sources:
         identifier: fragesvar
         description: >
           Answers per survey question and answer option. Wide layout: one column per question
-          (88 columns, named after the question number, e.g. `1.1`).
+          (88 columns, named after the question number, e.g. `q1_1`).
         config:
           meta:
             dagster:

@@ -1,9 +1,13 @@
 seeds:
   - name: kolada_kpi_translations
-    description: Unofficial English translations of the Kolada KPI catalogue (name, short name, description, operating area, perspective), plus unit and cost role per KPI.
-    config: 
-      column_types: 
-        kpi_id: string 
+    description: >
+      Unofficial English translations of the Kolada KPI catalogue (name, short name, description,
+      operating area, perspective), plus unit and cost role per KPI. Joined into dim_kolada_kpi on
+      kpi_id; every KPI the Dagster Kolada asset fetches needs a row here, or dim_kolada_kpi.kpi_name
+      fails its not_null test.
+    config:
+      column_types:
+        kpi_id: string
     columns:
       - name: kpi_id
         data_tests:
@@ -13,8 +17,8 @@ seeds:
         data_tests:
           - not_null
           - accepted_values:
-              arguments: 
-                values: 
+              arguments:
+                values:
                   - sek_per_inhabitant
                   - percent
                   - per_1000_inhabitants
@@ -27,16 +31,20 @@ seeds:
           - not_null
           - accepted_values:
               arguments:
-                values: 
+                values:
                   - total
                   - component
                   - not_applicable
 
   - name: kolada_population_projections
     description: >
-      The Kolada KPIs that hold SCB's population projections: the age group and horizon each one projects, and
-      base_kpi_id, the KPI with the same age group's actual population that fct_population_projections compares
-      it with. fct_kpi_values leaves these KPIs out, because their period is the base year, not the year projected.
+      The Kolada KPIs that hold SCB's population projections, with the age group and horizon
+      (years ahead) each one projects. A projection is stored under its base year, not the year
+      it projects: target year = base year + horizon_years (joined into dim_kolada_kpi).
+      base_kpi_id is the KPI with the same age group's actual population, for reference.
+      Only the 5-year projections for the total population (N02907) and 65+ (N02912) are used,
+      in rpt_region_year_metrics, which carries the latest projection forward until a newer
+      base year arrives. Base year 2025 is the only one loaded so far.
     config:
       column_types:
         kpi_id: string
@@ -67,19 +75,24 @@ seeds:
                 to: ref('kolada_kpi_translations')
                 field: kpi_id
 
-
   - name: regions
-    description: Mapping of region short names
-    config: 
+    description: >
+      The 21 regions plus Sweden (`0000`), keyed on the Kolada region code, with each source's
+      spelling of the region name so staging can map waiting-times and NPE rows to region_id.
+      The base of dim_region.
+    config:
       column_types:
         region_id: string
         region_short_name: string
         region_waiting_times: string
     columns:
       - name: region_id
+        description: Kolada region code; `0000` = Sweden.
         data_tests:
           - unique
           - not_null
+      - name: region_short_name
+        description: Short region name without "Region" (e.g. "Skåne"); 'Sweden' for `0000`.
       - name: region_waiting_times
         description: >
           Region name exactly as spelled in Socialstyrelsen's waiting-times extracts
@@ -96,14 +109,32 @@ seeds:
         data_tests:
           - unique
       - name: data_quality_note
-        description: Notes based on findings in other sources
+        description: >
+          Known data issues found while profiling the sources. The text 'journal system change'
+          is load-bearing: rpt_region_year_metrics matches it to drop a region from the national
+          waiting-time benchmark and to mark its waiting-time data unreliable, so keep that exact
+          wording when editing a note.
+
+  - name: month_translations
+    description: >
+      Swedish month names as used in Socialstyrelsen's waiting-times extracts, with English names
+      and month numbers. Used in waiting-times staging to build period_start.
+    columns:
+      - name: month_sv
+        data_tests:
+          - unique
+          - not_null
+      - name: month_num
+        data_tests:
+          - unique
+          - not_null
 
   - name: npe_question_translations
     description: >
-      Unofficial English translations of the NPE primary care questions, matched to
-      stg_npe__questions on the exact Swedish question text rather than the question
-      number, which can change between survey rounds. A new or reworded question has
-      no match and fails the not_null test on dim_npe_question.question_text.
+      Unofficial English translations of the NPE primary care questions, matched on the exact
+      Swedish question text rather than the question number, which can change between survey
+      rounds. Not used by any model yet: kept for question-level NPE models (raw `fragor` and
+      `medelvarde`).
     columns:
       - name: question_text_sv
         data_tests:
@@ -118,8 +149,9 @@ seeds:
 
   - name: npe_answer_translations
     description: >
-      Unofficial English translations of the NPE answer options, matched on the exact
-      Swedish answer text. One row per distinct text, shared by every question that uses it.
+      Unofficial English translations of the NPE answer options, matched on the exact Swedish
+      answer text. One row per distinct text, shared by every question that uses it. Not used by
+      any model yet: kept for question-level NPE models (raw `fragesvar`).
     columns:
       - name: answer_text_sv
         data_tests:
@@ -131,8 +163,10 @@ seeds:
 
   - name: npe_dimension_translations
     description: >
-      English names for the NPE dimensions, matched on the Swedish dimension name.
-      dimension_code is the column prefix used in stg_npe__dimension_scores.
+      English codes and names for the NPE dimensions, matched on the Swedish dimension name.
+      The stg_npe_dimensions macro uses it to translate the unpivoted dimension names;
+      dimension_code becomes `dimension` in staging. 'Övriga frågor' (other questions) isn't
+      one of the six dimensions in the dimension tables.
     columns:
       - name: dimension_sv
         data_tests:
@@ -147,7 +181,10 @@ seeds:
           - not_null
 
   - name: npe_survey_translations
-    description: English labels for the NPE survey's measurement and selection, matched on the Swedish values.
+    description: >
+      English labels for the NPE survey's measurement and selection, and for the comment SKR
+      gives when a result is suppressed, matched on the Swedish values. The stg_npe_dimensions
+      macro uses only comment_sv → comment; selection is translated in the macro itself.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -164,10 +201,11 @@ seeds:
 
   - name: care_unit_match_overrides
     description: >
-      Hand-checked links between an NPE health centre (HSA-ID) and a waiting-times unit name that the
-      automatic name matching in int_care_unit_matches misses, e.g. 'husläkarmottagning' in one source
-      and 'vårdcentral' in the other. Only pairs whose distinctive name and region agree; units that
-      one source splits and the other merges stay unmatched. npe_name and note are for reading only.
+      Hand-checked links between an NPE health centre (HSA-ID) and a waiting-times unit name that
+      automatic name matching misses, e.g. 'husläkarmottagning' in one source and 'vårdcentral' in
+      the other. Only pairs whose distinctive name and region agree; units that one source splits
+      and the other merges stay unmatched. npe_name and note are for reading only. Not used by any
+      model yet: kept for a health-centre-level model that joins the two sources.
     config:
       column_types:
         region_id: string

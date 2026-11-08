@@ -49,7 +49,7 @@ models:
     description: >
       Half-width of SKR's published confidence interval (± margin) for each NPE dimension score,
       one row per survey year, unit and dimension; same grain and key as
-      `stg_patient_surveys__dimensions`. Interval = score ± ci_margin.
+      `stg_patient_surveys__dimensions`. Interval = score ± score_ci.
       The confidence level isn't stated by SKR. Suppressed margins are kept as NULL,
       with the reason in `comment_sv` / `comment`.
       Built by the stg_npe_dimensions macro, shared with stg_patient_surveys__dimensions.
@@ -75,5 +75,5 @@ models:
       - name: dimension
         data_tests:
           - not_null
-      - name: ci_margin
+      - name: score_ci
         description: Half-width of the confidence interval, in score points. NULL when suppressed.
