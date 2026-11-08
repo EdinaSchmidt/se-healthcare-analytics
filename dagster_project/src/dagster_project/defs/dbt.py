@@ -1,10 +1,12 @@
 """dbt models as Dagster assets.
 
 Lives in src/dagster_project/defs/ so Dagster auto-loads it.
-Runs the dbt v2 binary from dbt_project/.venv (never a dbt on PATH).
+Runs the native dbt Fusion binary (installed standalone, not via pip/uv).
+Override the location with the DBT_EXECUTABLE env var.
 """
 
 import os
+import shutil
 from pathlib import Path
 
 import dagster as dg
@@ -13,16 +15,17 @@ from dagster_dbt import DagsterDbtTranslator, DbtCliResource, dbt_assets
 # repo root / dbt_project  (defs -> dagster_project -> src -> dagster_project -> repo root)
 DBT_PROJECT_DIR = Path(__file__).resolve().parents[4] / "dbt_project"
 
-# dbt v2 binary inside the dbt project's own uv venv.
-# Windows: .venv/Scripts/dbt.exe, Linux/macOS: .venv/bin/dbt. Override with DBT_EXECUTABLE.
-_default_exe = (
-    DBT_PROJECT_DIR / ".venv" / "Scripts" / "dbt.exe"
-    if os.name == "nt"
-    else DBT_PROJECT_DIR / ".venv" / "bin" / "dbt"
-)
-DBT_EXECUTABLE = os.getenv("DBT_EXECUTABLE", str(_default_exe))
+# Native Fusion binary: explicit DBT_EXECUTABLE wins, otherwise the dbt on PATH.
+# Don't install the pip `dbt` package into a venv: on Windows it recursively
+# spawns `dbt internal get-distribution-info` and can exhaust memory.
+DBT_EXECUTABLE = os.getenv("DBT_EXECUTABLE") or shutil.which("dbt")
+if not DBT_EXECUTABLE:
+    raise RuntimeError(
+        "dbt Fusion not found. Install it standalone (see README) "
+        "or set DBT_EXECUTABLE to the binary's path."
+    )
 
-# Manifest produced by `uv run dbt parse` in dbt_project/ (see README).
+# Manifest produced by `dbt parse` in dbt_project/ (see README).
 DBT_MANIFEST = DBT_PROJECT_DIR / "target" / "manifest.json"
 
 dbt_resource = DbtCliResource(
