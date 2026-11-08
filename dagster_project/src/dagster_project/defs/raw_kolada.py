@@ -1,8 +1,8 @@
-"""Load primary care KPIs from the Kolada API into BigQuery.
+"""Load primary care and population KPIs from the Kolada API into BigQuery.
 
 Kolada has an API, so there is no manual step and no GCS landing: a monthly
 schedule fetches every KPI and year and replaces the raw tables. Kolada revises
-earlier years, so a full refresh (about 100 small API calls) is both simpler
+earlier years, so a full refresh (about 300 small API calls) is both simpler
 and more correct than loading incrementally.
 """
 
@@ -73,7 +73,7 @@ def _to_frame(context, table: str, records: list[dict], schema: list[bq.SchemaFi
             [RAW_DATASET, "kpi_values"],
             group_name=RAW_DATASET,
             kinds={"api", "bigquery"},
-            description="Primary care KPI values per region, year and gender (T/K/M) from Kolada.",
+            description="Primary care and population KPI values per region, year and gender (T/K/M) from Kolada.",
         ),
         dg.AssetSpec(
             [RAW_DATASET, "kpis"],

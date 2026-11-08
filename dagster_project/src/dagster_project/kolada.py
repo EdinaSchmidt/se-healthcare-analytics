@@ -28,6 +28,45 @@ KPIS = {
     # Access (validation against Socialstyrelsen data)
     "N79173": "Medical assessment within 3 days (%)",
     "N79179": "Phone calls answered same day (%)",
+    # Population on 31 December; N01951 is the denominator of the per-inhabitant KPIs above
+    "N01951": "Inhabitants, total",
+    "N01938": "Inhabitants 65+",
+    "N01960": "Inhabitants 65+, share (%)",
+    "N01957": "Inhabitants 80+",
+    "N01813": "Inhabitants 80+, share (%)",
+    # SCB population projections, stored under their base year (new base year every third year).
+    # 65+ is only projected 5 years ahead; the 10-year age bands are 67-79 and 80+.
+    "N02907": "Projected inhabitants in 5 years",
+    "N02912": "Projected inhabitants 65+ in 5 years",
+    "N02914": "Projected inhabitants 80+ in 5 years",
+    "N02834": "Projected inhabitants in 10 years",
+    "N02837": "Projected inhabitants 80+ in 10 years",
+    # Care need and health (CNI 1 = national level; no row for the whole country)
+    "N00992": "Care Need Index (CNI)",
+    "N00923": "Life expectancy, men (5-year average)",
+    "N00925": "Life expectancy, women (5-year average)",
+    # Public opinion, Hälso- och sjukvårdsbarometern (residents, not only patients)
+    "U70450": "Reasonable waiting time to health centre (%)",
+    "U71458": "Trust in health centres (%)",
+    # Workforce: region employees in November, so staff of private providers are excluded.
+    # No data for Gotland; gaps for Norrbotten, Skåne and Östergötland in some years.
+    "N71200": "Permanent monthly-paid staff (%)",
+    "N71201": "Temporary monthly-paid staff (%)",
+    "N71202": "Temporary hourly-paid staff (%)",
+    "N71204": "Hours worked by temporary monthly-paid staff (%)",
+    "N71205": "Hours worked by temporary hourly-paid staff (%)",
+    "N71206": "Employed full time (%)",
+    "N71207": "Employed part time 75-99 % (%)",
+    "N71208": "Employed part time 1-74 % (%)",
+    "N71209": "Working full time (%)",
+    "N71210": "Working part time 75-99 % (%)",
+    "N71211": "Working part time 1-74 % (%)",
+    "N71212": "Staff aged 34 or younger (%)",
+    "N71213": "Staff aged 35-54 (%)",
+    "N71214": "Staff aged 55+ (%)",
+    "N71218": "Staff aged 55-64 (%)",
+    "N71219": "Staff aged 65+ (%)",
+    "N71217": "Foreign-born staff vs population, balance ratio",
 }
 
 RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
