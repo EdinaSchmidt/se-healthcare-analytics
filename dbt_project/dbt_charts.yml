@@ -1,5 +1,8 @@
+locked_schema_version: "0.11.0"
+
 sources:
   reporting:
     type: dbt_profile
     profile: se_healthcare_analytics
     target: prod
+    target_path: target/prod
