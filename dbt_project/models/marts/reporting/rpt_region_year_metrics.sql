@@ -41,6 +41,23 @@ WITH kolada_all AS (
         ALL
 )
 
+,projections AS (
+    -- SCB projections are stored under their base year (a new one every third year).
+    -- Each is valid from its base year until the next one arrives.
+    SELECT
+        region_id
+        ,year AS projection_base_year
+        ,LEAD(year) OVER (PARTITION BY region_id ORDER BY year) AS next_projection_base_year
+        ,residents AS residents_at_projection_base
+        ,residents_65_plus AS residents_65_plus_at_projection_base
+        ,residents_projected_5y
+        ,residents_projection_target_year
+        ,residents_65_plus_projected_5y
+        ,residents_65_plus_projection_target_year
+    FROM kolada_all
+    WHERE residents_projected_5y IS NOT NULL
+)
+
 ,kolada_national AS (
     SELECT 
         year
@@ -173,17 +190,8 @@ SELECT
     ,reg.data_quality_note
     ,year
     ,kol.residents
-    ,kol.residents_projected_5y
-    ,kol.residents_projection_base_year
-    ,kol.residents_projection_target_year
-    ,SAFE_DIVIDE(kol.residents_projected_5y, kol.residents) - 1  AS residents_growth_5y
     ,kol.residents_65_plus
     ,SAFE_DIVIDE(kol.residents_65_plus, kol.residents) AS residents_65_plus_share
-    ,kol.residents_65_plus_projected_5y
-    ,SAFE_DIVIDE(kol.residents_65_plus_projected_5y, kol.residents_projected_5y) AS residents_65_plus_share_projected_5y
-    ,kol.residents_65_plus_projection_base_year
-    ,kol.residents_65_plus_projection_target_year
-    ,SAFE_DIVIDE(kol.residents_65_plus_projected_5y, kol.residents_65_plus) - 1  AS residents_65_plus_growth_5y
     ,kol.care_need_index
     ,kol.reasonable_wait_share
     ,nat.national_reasonable_wait_share
@@ -252,35 +260,57 @@ FROM
 
 
 SELECT 
-    *
-    ,residents_65_plus_share_projected_5y - residents_65_plus_share AS residents_65_plus_share_change_5y
-    ,first_contact_answered_share - national_first_contact_answered_share AS first_contact_answered_share_diff_from_national
-    ,assessed_within_3_days_share - national_assessed_within_3_days_share AS assessed_within_3_days_share_diff_from_national
+    m.*
+    ,p.residents_projected_5y
+    ,p.projection_base_year AS residents_projection_base_year
+    ,p.residents_projection_target_year
+    ,SAFE_DIVIDE(p.residents_projected_5y, p.residents_at_projection_base) - 1 AS residents_growth_5y
+    ,p.residents_65_plus_projected_5y
+    ,SAFE_DIVIDE(p.residents_65_plus_projected_5y, p.residents_projected_5y) AS residents_65_plus_share_projected_5y
+    ,p.projection_base_year AS residents_65_plus_projection_base_year
+    ,p.residents_65_plus_projection_target_year
+    ,SAFE_DIVIDE(p.residents_65_plus_projected_5y, p.residents_65_plus_at_projection_base) - 1 AS residents_65_plus_growth_5y
+    ,SAFE_DIVIDE(p.residents_65_plus_projected_5y, p.residents_projected_5y)
+        - SAFE_DIVIDE(p.residents_65_plus_at_projection_base, p.residents_at_projection_base)
+        AS residents_65_plus_share_change_5y
 
-    ,CASE WHEN NOT is_national AND total_calls IS NOT NULL THEN TRUE 
-        WHEN is_national THEN NULL 
+    ,m.first_contact_answered_share - m.national_first_contact_answered_share AS first_contact_answered_share_diff_from_national
+    ,m.assessed_within_3_days_share - m.national_assessed_within_3_days_share AS assessed_within_3_days_share_diff_from_national
+
+    ,CASE WHEN NOT m.is_national AND m.total_calls IS NOT NULL THEN TRUE 
+        WHEN m.is_national THEN NULL 
         ELSE FALSE END has_first_contact_data
+    
+    ,CASE WHEN NOT m.is_national AND m.total_assessments IS NOT NULL THEN TRUE 
+        WHEN m.is_national THEN NULL 
+        ELSE FALSE END has_medical_assessment_data 
 
-    ,CASE WHEN NOT is_national AND accessibility_score IS NOT NULL THEN TRUE 
-        WHEN is_national THEN NULL 
+    ,CASE WHEN NOT m.is_national AND m.accessibility_score IS NOT NULL THEN TRUE 
+        WHEN m.is_national THEN NULL 
         ELSE FALSE END has_patient_survey_data
 
-    ,CASE WHEN NOT is_national AND data_quality_note LIKE '%journal system change%' THEN TRUE
-        WHEN is_national THEN NULL 
+    ,CASE WHEN NOT m.is_national AND m.data_quality_note LIKE '%journal system change%' THEN TRUE
+        WHEN m.is_national THEN NULL 
         ELSE FALSE END has_journal_system_change
     
-    ,CASE WHEN is_national THEN NULL
-        WHEN data_quality_note LIKE '%journal system change%' THEN FALSE
-        WHEN data_quality_flag_medical_assessment_missing_months > 0 THEN FALSE
+    ,CASE WHEN m.is_national THEN NULL
+        WHEN m.data_quality_note LIKE '%journal system change%' THEN FALSE
+        WHEN m.data_quality_flag_medical_assessment_months_in_data IS NULL THEN NULL  -- no rows for the year
+        WHEN m.data_quality_flag_medical_assessment_missing_months > 0 THEN FALSE
         ELSE TRUE END AS is_access_data_reliable
 
-    ,CASE WHEN is_national THEN NULL
-        WHEN data_quality_note LIKE '%journal system change%' THEN FALSE
-        WHEN data_quality_flag_first_contact_missing_months > 0 THEN FALSE
+
+    ,CASE WHEN m.is_national THEN NULL
+        WHEN m.data_quality_note LIKE '%journal system change%' THEN FALSE
+        WHEN m.data_quality_flag_first_contact_months_in_data IS NULL THEN NULL  -- no rows for the year
+        WHEN m.data_quality_flag_first_contact_missing_months > 0 THEN FALSE
         ELSE TRUE END AS is_first_contact_data_reliable
 
-FROM metrics
-
+FROM metrics m
+LEFT JOIN projections p
+    ON p.region_id = m.region_id
+    AND m.year >= p.projection_base_year
+    AND (p.next_projection_base_year IS NULL OR m.year < p.next_projection_base_year)
 
 
     

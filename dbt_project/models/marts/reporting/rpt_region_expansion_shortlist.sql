@@ -15,34 +15,36 @@ WITH flags AS (
         ,first_contact_answered_share_diff_from_national
         ,assessed_within_3_days_share_diff_from_national
 
+        -- NULL = can't be assessed: unreliable data or a missing input.
+        -- The comparison in ELSE returns NULL when its input is NULL.
         ,CASE WHEN is_national THEN NULL
-            WHEN NOT is_access_data_reliable THEN NULL
-            WHEN assessed_within_3_days_share_diff_from_national <= -0.05 THEN TRUE
-            ELSE FALSE END AS is_access_below_national
+            WHEN is_access_data_reliable IS NOT TRUE THEN NULL
+            ELSE assessed_within_3_days_share_diff_from_national <= -0.05
+            END AS is_access_below_national
 
         ,CASE WHEN is_national THEN NULL
-            WHEN NOT is_first_contact_data_reliable THEN NULL
-            WHEN NOT has_first_contact_data THEN NULL
-            WHEN first_contact_answered_share_diff_from_national <= -0.1 THEN TRUE
-            ELSE FALSE END AS is_first_call_below_national
+            WHEN is_first_contact_data_reliable IS NOT TRUE THEN NULL
+            WHEN has_first_contact_data IS NOT TRUE THEN NULL
+            ELSE first_contact_answered_share_diff_from_national <= -0.1
+            END AS is_first_call_below_national
 
         ,CASE WHEN is_national THEN NULL
-            WHEN NOT has_patient_survey_data THEN NULL
-            WHEN accessibility_score_ci_upper < national_accessibility_score_ci_lower THEN TRUE
-            ELSE FALSE END AS is_accessibility_clearly_below_national
+            WHEN has_patient_survey_data IS NOT TRUE THEN NULL
+            ELSE accessibility_score_ci_upper < national_accessibility_score_ci_lower
+            END AS is_accessibility_clearly_below_national
 
         ,CASE WHEN is_national THEN NULL
-            WHEN NOT has_patient_survey_data THEN NULL
-            WHEN continuity_score_ci_upper < national_continuity_score_ci_lower THEN TRUE
-            ELSE FALSE END AS is_continuity_clearly_below_national
-        
-        ,CASE WHEN is_national THEN NULL
-            WHEN reasonable_wait_diff <= -0.05 THEN TRUE
-            ELSE FALSE END AS is_reasonable_wait_below_national
+            WHEN has_patient_survey_data IS NOT TRUE THEN NULL
+            ELSE continuity_score_ci_upper < national_continuity_score_ci_lower
+            END AS is_continuity_clearly_below_national
 
         ,CASE WHEN is_national THEN NULL
-            WHEN trust_diff <= -0.05 THEN TRUE
-            ELSE FALSE END AS is_trust_below_national
+            ELSE reasonable_wait_diff <= -0.05
+            END AS is_reasonable_wait_below_national
+
+        ,CASE WHEN is_national THEN NULL
+            ELSE trust_diff <= -0.05
+            END AS is_trust_below_national
 
 
     FROM {{ ref('rpt_region_year_metrics') }}

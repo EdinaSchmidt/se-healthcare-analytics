@@ -30,4 +30,4 @@ SELECT
     ,residents_regional
     ,SAFE_DIVIDE(residents_national - residents_regional, residents_national) AS residence_diff
 FROM national FULL OUTER JOIN regional USING(year)
-WHERE SAFE_DIVIDE(residents_national - residents_regional, residents_national) >= 0.00001
+WHERE ABS(SAFE_DIVIDE(residents_national - residents_regional, residents_national)) >= 0.00001

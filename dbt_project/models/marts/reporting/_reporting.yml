@@ -10,6 +10,10 @@ models:
       are summed over regions not changing journal systems, matching how
       Socialstyrelsen calculates its national figure, so the raw `0000` waiting-time
       values (all regions) differ from the benchmark.
+      Population projections: SCB's 5-year projections are published under a base year
+      (a new one every third year). Each row uses the latest projection at or before its
+      year, carried forward until a newer base year arrives, with growth measured from
+      the base year. Years before the first base year (2025) have no projection.
       Data notes: waiting times start July 2025, so 2025 covers July-December only.
       Stockholm has no first-contact data. Sörmland has no NPE results. Nine regions
       are changing journal systems (Blekinge, Dalarna, Gävleborg, Halland, Norrbotten,
@@ -34,6 +38,9 @@ models:
       - dbt_utils.expression_is_true:
           arguments:
             expression: "continuity_score_ci_lower <= continuity_score AND continuity_score <= continuity_score_ci_upper"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "residents_projection_base_year <= year AND residents_65_plus_projection_base_year <= year"
     columns:
       # keys and region attributes
       - name: region_id
@@ -67,13 +74,20 @@ models:
         data_type: int64
       - name: residents_projected_5y
         data_type: int64
+        description: >
+          SCB's projected residents in `residents_projection_target_year`, from the latest
+          projection at or before `year` (carried forward). NULL before the first base year.
       - name: residents_projection_base_year
         data_type: int64
+        description: Base year of the projection used on this row; equals `year` only in a base year.
       - name: residents_projection_target_year
         data_type: int64
+        description: Year the projection refers to (base year + 5).
       - name: residents_growth_5y
         data_type: float64
-        description: Projected relative change in residents over 5 years.
+        description: >
+          Projected relative change in residents from the base year to the target year
+          (`residents_projected_5y` ÷ residents in the base year - 1). Not measured from `year`.
       - name: residents_65_plus
         data_type: int64
       - name: residents_65_plus_share
@@ -85,15 +99,23 @@ models:
                 max_value: 1
       - name: residents_65_plus_projected_5y
         data_type: int64
+        description: >
+          SCB's projected residents aged 65+ in the target year, from the same projection as
+          `residents_projected_5y` (carried forward).
       - name: residents_65_plus_share_projected_5y
         data_type: float64
+        description: Projected 65+ share in the target year (`residents_65_plus_projected_5y` ÷ `residents_projected_5y`).
       - name: residents_65_plus_projection_base_year
         data_type: int64
+        description: Base year of the 65+ projection used on this row (same as `residents_projection_base_year`).
       - name: residents_65_plus_projection_target_year
         data_type: int64
+        description: Year the 65+ projection refers to (base year + 5).
       - name: residents_65_plus_growth_5y
         data_type: float64
-        description: Projected relative change in residents aged 65+ over 5 years.
+        description: >
+          Projected relative change in residents aged 65+ from the base year to the target
+          year (projected ÷ 65+ residents in the base year - 1). Not measured from `year`.
       - name: care_need_index
         data_type: float64
         description: Care Need Index (CNI). Sweden = 1.
@@ -252,7 +274,9 @@ models:
       # derived comparisons
       - name: residents_65_plus_share_change_5y
         data_type: float64
-        description: Projected change in the 65+ share over 5 years, in share points.
+        description: >
+          Projected change in the 65+ share from the base year to the target year, in share
+          points (`residents_65_plus_share_projected_5y` - 65+ share in the base year).
       - name: first_contact_answered_share_diff_from_national
         data_type: float64
         description: Region - national, in share points.
@@ -263,16 +287,18 @@ models:
       # data availability and reliability (NULL for Sweden)
       - name: has_first_contact_data
         data_type: boolean
+      - name: has_medical_assessment_data 
+        data_type: boolean
       - name: has_patient_survey_data
         data_type: boolean
       - name: has_journal_system_change
         data_type: boolean
       - name: is_access_data_reliable
         data_type: boolean
-        description: False for regions changing journal systems or years with missing months of medical assessment data.
+        description: False for regions changing journal systems or years with missing months of medical assessment data, NULL when there is no data for the year.
       - name: is_first_contact_data_reliable
         data_type: boolean
-        description: False for regions changing journal systems or years with missing months of first-contact data.
+        description: False for regions changing journal systems or years with missing months of first-contact data, NULL when there is no data for the year
 
   - name: rpt_region_expansion_shortlist
     description: >
@@ -322,10 +348,13 @@ models:
         data_type: float64
       - name: residents_growth_5y
         data_type: float64
+        description: From the latest SCB projection, measured from its base year (see `rpt_region_year_metrics`).
       - name: residents_65_plus_growth_5y
         data_type: float64
+        description: From the latest SCB projection, measured from its base year (see `rpt_region_year_metrics`).
       - name: residents_65_plus_share_change_5y
         data_type: float64
+        description: From the latest SCB projection, measured from its base year (see `rpt_region_year_metrics`).
       - name: purchase_share_diff
         data_type: float64
         description: >
@@ -347,7 +376,7 @@ models:
       # flags
       - name: is_access_below_national
         data_type: boolean
-        description: Share assessed within 3 days at least 5 share points below national. NULL if access data is unreliable.
+        description: Share assessed within 3 days at least 5 share points below national. NULL if data is missing or unreliable.
       - name: is_first_call_below_national
         data_type: boolean
         description: Answered first-contact share at least 10 share points below national. NULL if data is missing or unreliable.
@@ -359,10 +388,10 @@ models:
         description: NPE continuity CI entirely below the national CI. NULL without NPE results.
       - name: is_reasonable_wait_below_national
         data_type: boolean
-        description: Reasonable-wait share at least 5 share points below national.
+        description: Reasonable-wait share at least 5 share points below national, NULL if the Kolada value is missing
       - name: is_trust_below_national
         data_type: boolean
-        description: Trust share at least 5 share points below national.
+        description: Trust share at least 5 share points below national, NULL if the Kolada value is missing
 
       # scoring
       - name: assessable_flags

@@ -1,3 +1,13 @@
+-- Socialstyrelsen's national row ('Alla regioner') must equal the sum of the
+-- regional rows for every month, for answered and total calls (all contact
+-- types, centre aggregate rows only). A mismatch means a region is missing
+-- (e.g. a spelling not in the regions seed), duplicated, or double-counted
+-- across contact types or centres. A month missing on either side also fails.
+-- Checks the raw data, so all regions count, including those changing journal
+-- systems; the reporting benchmark (regions not changing journal systems) is
+-- not tested here. Tolerance: 0.001% relative difference.
+
+
 WITH national AS (
     SELECT 
         period_start
